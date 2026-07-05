@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#181A20">
+<title>Driving Log</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<!-- ===================== SETUP GATE ===================== -->
+<div id="setup-screen" class="screen setup-screen">
+  <div class="setup-card">
+    <h1>Driving Log</h1>
+    <p class="muted">This device isn't set up yet.</p>
+
+    <div id="setup-paste">
+      <label for="setup-code-input">Paste setup code</label>
+      <textarea id="setup-code-input" rows="3" placeholder="dlog1...."></textarea>
+      <button id="setup-code-submit" class="btn btn-primary">Connect this device</button>
+      <p id="setup-error" class="error hidden"></p>
+      <button id="show-advanced" class="btn-link">First device? Enter AWS details manually</button>
+    </div>
+
+    <div id="setup-advanced" class="hidden">
+      <label for="adv-region">AWS region</label>
+      <input id="adv-region" placeholder="us-east-1">
+      <label for="adv-idp">Cognito Identity Pool ID</label>
+      <input id="adv-idp" placeholder="us-east-1:xxxxxxxx-xxxx-...">
+      <label for="adv-table">DynamoDB table name</label>
+      <input id="adv-table" placeholder="DrivingLog">
+      <label for="adv-driver">Driver name for this device</label>
+      <input id="adv-driver" placeholder="e.g. jamie">
+      <button id="setup-advanced-submit" class="btn btn-primary">Save & connect</button>
+      <p id="setup-advanced-error" class="error hidden"></p>
+      <button id="show-paste" class="btn-link">Have a setup code instead?</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MAIN APP ===================== -->
+<div id="app" class="hidden">
+
+  <header class="app-header">
+    <span class="driver-name" id="driver-name-label"></span>
+    <span class="sync-dot" id="sync-dot" title="Synced"></span>
+  </header>
+
+  <main id="main">
+
+    <!-- HOME -->
+    <section id="screen-home" class="screen">
+      <div class="timer-card">
+        <div class="timer-label" id="timer-status">Ready to drive</div>
+        <div class="timer mono" id="timer-display">00:00:00</div>
+        <button id="start-stop-btn" class="btn btn-huge btn-start">Start Drive</button>
+      </div>
+    </section>
+
+    <!-- PROGRESS -->
+    <section id="screen-progress" class="screen hidden">
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 220 220" width="220" height="220" id="gauge-svg">
+          <circle cx="110" cy="110" r="92" class="gauge-track"/>
+          <circle cx="110" cy="110" r="92" class="gauge-day" id="gauge-day"/>
+          <circle cx="110" cy="110" r="92" class="gauge-night" id="gauge-night"/>
+        </svg>
+        <div class="gauge-center">
+          <div class="gauge-total mono" id="gauge-total-hours">0.0</div>
+          <div class="gauge-total-label">of <span id="gauge-goal-hours">0</span> hrs</div>
+        </div>
+      </div>
+
+      <div class="progress-rows">
+        <div class="progress-row">
+          <span class="dot dot-day"></span>
+          <span class="progress-label">Day</span>
+          <span class="progress-value mono" id="day-hours-value">0.0 / 0 hrs</span>
+        </div>
+        <div class="progress-row">
+          <span class="dot dot-night"></span>
+          <span class="progress-label">Night</span>
+          <span class="progress-value mono" id="night-hours-value">0.0 / 0 hrs</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- LOG -->
+    <section id="screen-log" class="screen hidden">
+      <div class="log-header">
+        <h2>Sessions</h2>
+        <button id="add-entry-btn" class="btn btn-small">+ Add Entry</button>
+      </div>
+      <div id="log-list" class="log-list"></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="screen-settings" class="screen hidden">
+      <h2>Goals</h2>
+      <label for="goal-total">Total hours goal</label>
+      <input id="goal-total" type="number" min="0" step="1">
+      <label for="goal-night">Night hours goal</label>
+      <input id="goal-night" type="number" min="0" step="1">
+
+      <h2>Day / Night Cutoff</h2>
+      <label for="day-start">Day starts at (0&ndash;23)</label>
+      <input id="day-start" type="number" min="0" max="23" step="1">
+      <label for="night-start">Night starts at (0&ndash;23)</label>
+      <input id="night-start" type="number" min="0" max="23" step="1">
+
+      <button id="save-settings-btn" class="btn btn-primary">Save settings</button>
+      <p id="settings-saved-msg" class="hint hidden">Saved.</p>
+
+      <hr>
+
+      <h2>Other devices</h2>
+      <label for="new-driver-name">Driver name for new device</label>
+      <input id="new-driver-name" placeholder="e.g. taylor">
+      <button id="gen-setup-code-btn" class="btn">Generate setup code</button>
+      <textarea id="setup-code-output" rows="3" readonly class="hidden mono"></textarea>
+
+      <hr>
+
+      <h2>Export &amp; Backup</h2>
+      <button id="print-log-btn" class="btn">Print / export log</button>
+      <button id="download-backup-btn" class="btn">Download backup (.json)</button>
+      <label for="restore-input" class="btn btn-outline file-btn">Restore from backup
+        <input id="restore-input" type="file" accept="application/json" class="hidden">
+      </label>
+      <p id="restore-msg" class="hint hidden"></p>
+
+      <hr>
+
+      <button id="reset-device-btn" class="btn-link danger">Disconnect this device</button>
+    </section>
+
+  </main>
+
+  <nav class="tabbar">
+    <button class="tab active" data-screen="home">Home</button>
+    <button class="tab" data-screen="progress">Progress</button>
+    <button class="tab" data-screen="log">Log</button>
+    <button class="tab" data-screen="settings">Settings</button>
+  </nav>
+
+</div>
+
+<!-- ===================== MANUAL ENTRY MODAL ===================== -->
+<div id="entry-modal" class="modal hidden">
+  <div class="modal-card">
+    <h2 id="entry-modal-title">Add Entry</h2>
+    <label for="entry-date">Date</label>
+    <input id="entry-date" type="date">
+
+    <div class="entry-mode-toggle">
+      <button id="mode-times" class="toggle-btn active">Start/end time</button>
+      <button id="mode-duration" class="toggle-btn">Just duration</button>
+    </div>
+
+    <div id="entry-times-fields">
+      <label for="entry-start-time">Start time</label>
+      <input id="entry-start-time" type="time">
+      <label for="entry-end-time">End time</label>
+      <input id="entry-end-time" type="time">
+    </div>
+
+    <div id="entry-duration-fields" class="hidden">
+      <label for="entry-duration">Duration (minutes)</label>
+      <input id="entry-duration" type="number" min="1" step="1">
+      <label for="entry-duration-period">Mostly</label>
+      <select id="entry-duration-period">
+        <option value="day">Day</option>
+        <option value="night">Night</option>
+      </select>
+    </div>
+
+    <p id="entry-error" class="error hidden"></p>
+
+    <div class="modal-actions">
+      <button id="entry-delete-btn" class="btn-link danger hidden">Delete</button>
+      <button id="entry-cancel-btn" class="btn">Cancel</button>
+      <button id="entry-save-btn" class="btn btn-primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
