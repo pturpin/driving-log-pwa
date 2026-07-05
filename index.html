@@ -113,6 +113,20 @@
       <label for="night-start">Night starts at (0&ndash;23)</label>
       <input id="night-start" type="number" min="0" max="23" step="1">
 
+      <label class="inline-check" for="use-astro-sun">
+        <input id="use-astro-sun" type="checkbox">
+        Use astronomical sunrise/sunset by date
+      </label>
+
+      <div id="astro-location-fields" class="hidden">
+        <label for="astro-lat">Latitude</label>
+        <input id="astro-lat" type="number" step="0.0001" placeholder="e.g. 40.7128">
+        <label for="astro-lon">Longitude</label>
+        <input id="astro-lon" type="number" step="0.0001" placeholder="e.g. -74.0060">
+        <button id="use-current-location-btn" class="btn btn-outline" type="button">Use current device location</button>
+        <p id="astro-location-msg" class="hint hidden"></p>
+      </div>
+
       <button id="save-settings-btn" class="btn btn-primary">Save settings</button>
       <p id="settings-saved-msg" class="hint hidden">Saved.</p>
 

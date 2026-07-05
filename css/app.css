@@ -60,6 +60,17 @@ h2 { font-size: 15px; font-weight: 600; color: var(--text-muted); text-transform
 .file-btn { text-align: center; }
 
 label { display: block; font-size: 13px; color: var(--text-muted); margin: 14px 0 6px; }
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 14px;
+}
+.inline-check input {
+  width: auto;
+  margin: 0;
+}
 input, textarea, select {
   width: 100%;
   background: var(--surface);
@@ -71,6 +82,10 @@ input, textarea, select {
   font-family: inherit;
 }
 textarea { resize: vertical; }
+
+#astro-location-fields {
+  margin-top: 10px;
+}
 
 hr { border: none; border-top: 1px solid var(--surface-2); margin: 20px 0; }
 .error { color: var(--danger); font-size: 13px; }

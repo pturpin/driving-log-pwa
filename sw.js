@@ -4,7 +4,7 @@
 // must always come from a live network request to DynamoDB, never from a
 // stale cache.
 
-const CACHE_NAME = 'drivelog-shell-v1';
+const CACHE_NAME = 'drivelog-shell-v2';
 const SHELL_ASSETS = [
   './',
   './index.html',
@@ -14,6 +14,7 @@ const SHELL_ASSETS = [
   './js/config.js',
   './js/utils.js',
   './js/dynamo.js',
+  './js/sun.js',
   './js/export.js',
   './icons/icon-192.png',
   './icons/icon-512.png'

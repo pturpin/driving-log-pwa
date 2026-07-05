@@ -2,6 +2,7 @@ import { loadConfig, saveConfig, clearConfig, encodeSetupCode, decodeSetupCode }
 import { readItem, updateItem } from './dynamo.js';
 import { splitDayNight, formatElapsed, formatMinutes, formatHoursDecimal, uid, formatDate, formatTime } from './utils.js';
 import { printLog, downloadBackup, parseBackup } from './export.js';
+import { getCutoffsForDate, hasSunConfig } from './sun.js';
 
 let config = loadConfig();
 let currentItem = null;
@@ -247,11 +248,93 @@ function renderLog() {
 }
 
 function renderSettingsForm() {
-  const s = currentItem.settings;
+  const s = normalizedSettings(currentItem.settings || {});
   document.getElementById('goal-total').value = s.goalTotalHours;
   document.getElementById('goal-night').value = s.goalNightHours;
   document.getElementById('day-start').value = s.dayStartHour;
   document.getElementById('night-start').value = s.nightStartHour;
+  document.getElementById('use-astro-sun').checked = !!s.useAstronomicalSun;
+  document.getElementById('astro-lat').value = Number.isFinite(s.latitude) ? s.latitude : '';
+  document.getElementById('astro-lon').value = Number.isFinite(s.longitude) ? s.longitude : '';
+  updateAstroLocationVisibility();
+}
+
+function updateAstroLocationVisibility() {
+  const useAstro = document.getElementById('use-astro-sun').checked;
+  const fields = document.getElementById('astro-location-fields');
+  fields.classList.toggle('hidden', !useAstro);
+}
+
+function normalizedSettings(settings) {
+  return {
+    goalTotalHours: Number.isFinite(settings.goalTotalHours) ? settings.goalTotalHours : 50,
+    goalNightHours: Number.isFinite(settings.goalNightHours) ? settings.goalNightHours : 10,
+    dayStartHour: Number.isFinite(settings.dayStartHour) ? settings.dayStartHour : 6,
+    nightStartHour: Number.isFinite(settings.nightStartHour) ? settings.nightStartHour : 20,
+    useAstronomicalSun: !!settings.useAstronomicalSun,
+    latitude: Number.isFinite(settings.latitude) ? settings.latitude : null,
+    longitude: Number.isFinite(settings.longitude) ? settings.longitude : null
+  };
+}
+
+async function requestCurrentPosition() {
+  if (!navigator.geolocation) return null;
+  try {
+    const pos = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 8000,
+        maximumAge: 600000
+      });
+    });
+    return {
+      latitude: Number(pos.coords.latitude.toFixed(4)),
+      longitude: Number(pos.coords.longitude.toFixed(4))
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function getCalculationSettings(settings) {
+  const safe = normalizedSettings(settings || {});
+  if (!safe.useAstronomicalSun) return safe;
+  const coords = await requestCurrentPosition();
+  if (!coords) return safe;
+  return {
+    ...safe,
+    latitude: coords.latitude,
+    longitude: coords.longitude
+  };
+}
+
+function nextMidnight(d) {
+  const x = new Date(d.getTime());
+  x.setHours(24, 0, 0, 0);
+  return x;
+}
+
+async function splitDayNightForSession(start, end, settings) {
+  const runtimeSettings = await getCalculationSettings(settings);
+  if (!hasSunConfig(runtimeSettings)) {
+    return splitDayNight(start, end, runtimeSettings.dayStartHour, runtimeSettings.nightStartHour);
+  }
+
+  let cur = new Date(start.getTime());
+  let dayMinutes = 0;
+  let nightMinutes = 0;
+
+  while (cur < end) {
+    const dayEnd = nextMidnight(cur);
+    const segmentEnd = dayEnd < end ? dayEnd : end;
+    const cutoffs = await getCutoffsForDate(cur, runtimeSettings);
+    const split = splitDayNight(cur, segmentEnd, cutoffs.dayStartHour, cutoffs.nightStartHour);
+    dayMinutes += split.dayMinutes;
+    nightMinutes += split.nightMinutes;
+    cur = segmentEnd;
+  }
+
+  return { dayMinutes, nightMinutes };
 }
 
 // ---------------------------------------------------------------------
@@ -300,16 +383,11 @@ async function startDrive() {
 }
 
 async function stopDrive() {
-  currentItem = await updateItem(config, (item) => {
+  currentItem = await updateItem(config, async (item) => {
     if (!item.active) throw new Error('No drive is currently in progress.');
     const start = new Date(item.active.startedAt);
     const end = new Date();
-    const { dayMinutes, nightMinutes } = splitDayNight(
-      start,
-      end,
-      item.settings.dayStartHour,
-      item.settings.nightStartHour
-    );
+    const { dayMinutes, nightMinutes } = await splitDayNightForSession(start, end, item.settings);
     const session = {
       id: uid(),
       start: start.toISOString(),
@@ -437,13 +515,8 @@ async function saveEntry() {
   }
 
   try {
-    currentItem = await updateItem(config, (item) => {
-      const { dayMinutes, nightMinutes } = splitDayNight(
-        start,
-        end,
-        item.settings.dayStartHour,
-        item.settings.nightStartHour
-      );
+    currentItem = await updateItem(config, async (item) => {
+      const { dayMinutes, nightMinutes } = await splitDayNightForSession(start, end, item.settings);
       const newSession = {
         id: editingSessionId || uid(),
         start: start.toISOString(),
@@ -484,15 +557,61 @@ async function deleteEntry() {
 // ---------------------------------------------------------------------
 
 function wireSettingsEvents() {
+  document.getElementById('use-astro-sun').addEventListener('change', updateAstroLocationVisibility);
+
+  document.getElementById('use-current-location-btn').addEventListener('click', async () => {
+    const msg = document.getElementById('astro-location-msg');
+    msg.classList.add('hidden');
+    const coords = await requestCurrentPosition();
+    if (!coords) {
+      msg.textContent = 'Could not get location. Enter lat/lon manually.';
+      msg.classList.remove('hidden');
+      return;
+    }
+    document.getElementById('astro-lat').value = coords.latitude;
+    document.getElementById('astro-lon').value = coords.longitude;
+    msg.textContent = 'Location captured.';
+    msg.classList.remove('hidden');
+  });
+
   document.getElementById('save-settings-btn').addEventListener('click', async () => {
     const goalTotalHours = parseFloat(document.getElementById('goal-total').value) || 0;
     const goalNightHours = parseFloat(document.getElementById('goal-night').value) || 0;
     const dayStartHour = parseInt(document.getElementById('day-start').value, 10);
     const nightStartHour = parseInt(document.getElementById('night-start').value, 10);
+    const useAstronomicalSun = document.getElementById('use-astro-sun').checked;
+    const latRaw = document.getElementById('astro-lat').value.trim();
+    const lonRaw = document.getElementById('astro-lon').value.trim();
+    let latitude = latRaw === '' ? null : parseFloat(latRaw);
+    let longitude = lonRaw === '' ? null : parseFloat(lonRaw);
+
+    if (useAstronomicalSun && (!Number.isFinite(latitude) || !Number.isFinite(longitude))) {
+      const coords = await requestCurrentPosition();
+      if (coords) {
+        latitude = coords.latitude;
+        longitude = coords.longitude;
+        document.getElementById('astro-lat').value = latitude;
+        document.getElementById('astro-lon').value = longitude;
+      }
+    }
+
+    if (useAstronomicalSun && (!Number.isFinite(latitude) || !Number.isFinite(longitude))) {
+      alert('Location permission was denied or unavailable. Enter latitude/longitude manually, or disable astronomical mode.');
+      return;
+    }
 
     currentItem = await updateItem(config, (item) => ({
       ...item,
-      settings: { goalTotalHours, goalNightHours, dayStartHour, nightStartHour }
+      settings: {
+        ...item.settings,
+        goalTotalHours,
+        goalNightHours,
+        dayStartHour,
+        nightStartHour,
+        useAstronomicalSun,
+        latitude,
+        longitude
+      }
     }));
     renderAll();
     const msg = document.getElementById('settings-saved-msg');
@@ -530,7 +649,11 @@ function wireSettingsEvents() {
       if (!confirm(`Restore ${sessions.length} session(s)? This replaces the current log for ${config.driver}.`)) {
         return;
       }
-      currentItem = await updateItem(config, (item) => ({ ...item, sessions, settings }));
+      currentItem = await updateItem(config, (item) => ({
+        ...item,
+        sessions,
+        settings: normalizedSettings(settings || {})
+      }));
       renderAll();
       msg.textContent = 'Restored successfully.';
       msg.classList.remove('hidden');

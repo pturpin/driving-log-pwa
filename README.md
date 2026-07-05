@@ -13,6 +13,7 @@ css/app.css          dashboard visual design (dark, amber/indigo gauge)
 js/app.js            UI logic, wiring, rendering
 js/config.js          setup-code encode/decode, per-device local config
 js/dynamo.js          DynamoDB read/write via Cognito guest credentials
+js/sun.js             sunrise/sunset lookup + local cache for day/night splits
 js/utils.js            day/night split math, formatting helpers
 js/export.js           print view, JSON backup/restore
 icons/               placeholder app icons (swap for real artwork any time)
@@ -118,12 +119,21 @@ design (see spec §8).
 provider, marshalling helpers) from `esm.sh` as ES modules — no bundler, no
 `npm install`, works straight from a `<script type="module">`. If your
 network policy doesn't allow loading from `esm.sh` at runtime, download the
-same three packages (`@aws-sdk/client-dynamodb`, `@aws-sdk/credential-providers`,
-`@aws-sdk/credential-provider-cognito-identity`, `@aws-sdk/util-dynamodb`) as ESM builds and change the three import URLs at
+same three packages (`@aws-sdk/client-dynamodb`, `@aws-sdk/credential-provider-cognito-identity`, `@aws-sdk/util-dynamodb`) as ESM builds and change the three import URLs at
 the top of `js/dynamo.js` to point at your self-hosted copies — nothing else
 in the app needs to change.
 
-## 5. Known gaps in this initial pass
+## 5. Astronomical day/night mode
+
+In **Settings → Day / Night Cutoff**, you can now enable
+**Use astronomical sunrise/sunset by date**.
+
+- Enter latitude/longitude manually, or tap **Use current device location**
+- The app fetches sunrise/sunset per date from `api.sunrise-sunset.org`
+- Results are cached locally per date/location for fewer network calls
+- If fetch fails/offline, it falls back to your manual `day start` / `night start` settings
+
+## 6. Known gaps in this initial pass
 
 - **Icons** are simple generated placeholders matching the color system —
   swap `icons/icon-192.png` / `icons/icon-512.png` for real artwork whenever

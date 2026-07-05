@@ -43,7 +43,10 @@ function emptyItem(driverId) {
       goalTotalHours: 50,
       goalNightHours: 10,
       dayStartHour: 6,
-      nightStartHour: 20
+      nightStartHour: 20,
+      useAstronomicalSun: true,
+      latitude: null,
+      longitude: null
     }
   };
 }
