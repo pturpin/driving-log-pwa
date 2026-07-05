@@ -119,7 +119,7 @@ provider, marshalling helpers) from `esm.sh` as ES modules — no bundler, no
 `npm install`, works straight from a `<script type="module">`. If your
 network policy doesn't allow loading from `esm.sh` at runtime, download the
 same three packages (`@aws-sdk/client-dynamodb`, `@aws-sdk/credential-providers`,
-`@aws-sdk/util-dynamodb`) as ESM builds and change the three import URLs at
+`@aws-sdk/credential-provider-cognito-identity`, `@aws-sdk/util-dynamodb`) as ESM builds and change the three import URLs at
 the top of `js/dynamo.js` to point at your self-hosted copies — nothing else
 in the app needs to change.
 

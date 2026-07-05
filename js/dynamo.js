@@ -10,9 +10,9 @@ import {
   DynamoDBClient,
   GetItemCommand,
   PutItemCommand
-} from 'https://esm.sh/@aws-sdk/client-dynamodb@3';
-import { fromCognitoIdentityPool } from 'https://esm.sh/@aws-sdk/credential-providers@3';
-import { marshall, unmarshall } from 'https://esm.sh/@aws-sdk/util-dynamodb@3';
+} from 'https://esm.sh/@aws-sdk/client-dynamodb@3?bundle';
+import { fromCognitoIdentityPool } from 'https://esm.sh/@aws-sdk/credential-provider-cognito-identity@3?bundle';
+import { marshall, unmarshall } from 'https://esm.sh/@aws-sdk/util-dynamodb@3?bundle';
 
 let cachedClient = null;
 let cachedConfigKey = null;
