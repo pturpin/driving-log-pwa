@@ -4,11 +4,16 @@ import { splitDayNight, formatElapsed, formatMinutes, formatHoursDecimal, uid, f
 import { printLog, downloadBackup, parseBackup } from './export.js';
 import { getCutoffsForDate, hasSunConfig } from './sun.js';
 
+const APP_VERSION = 'v6';
+
 let config = loadConfig();
 let currentItem = null;
 let tickHandle = null;
 let pollHandle = null;
 let editingSessionId = null; // set when the entry modal is editing rather than adding
+let swRegistration = null;
+let isRefreshingForUpdate = false;
+let latestPublishedVersion = APP_VERSION;
 
 // ---------------------------------------------------------------------
 // Boot
@@ -22,17 +27,149 @@ if (config) {
 }
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(() => {
-    /* offline shell just won't be available — not fatal */
+  navigator.serviceWorker.register('sw.js')
+    .then((registration) => {
+      swRegistration = registration;
+      wireUpdatePrompt(registration);
+    })
+    .catch(() => {
+      /* offline shell just won't be available — not fatal */
+    });
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (isRefreshingForUpdate) return;
+    isRefreshingForUpdate = true;
+    location.reload();
   });
+}
+
+function wireUpdatePrompt(registration) {
+  if (registration.waiting) showUpdateBanner();
+
+  registration.addEventListener('updatefound', () => {
+    const worker = registration.installing;
+    if (!worker) return;
+    worker.addEventListener('statechange', () => {
+      if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+        showUpdateBanner();
+      }
+    });
+  });
+}
+
+function showUpdateBanner(message = 'A new version is ready.', actionText = 'Refresh', actionHandler = null) {
+  const banner = document.getElementById('update-banner');
+  const text = document.getElementById('update-banner-text');
+  const btn = document.getElementById('update-now-btn');
+  if (!banner || !btn) return;
+
+  banner.classList.remove('hidden');
+  if (text) text.textContent = message;
+  setVersionBadge(`${APP_VERSION} update ready`, true);
+  btn.disabled = false;
+  btn.textContent = actionText;
+
+  if (actionHandler) {
+    btn.onclick = actionHandler;
+    return;
+  }
+
+  btn.onclick = () => {
+    const waiting = swRegistration?.waiting;
+    btn.disabled = true;
+    btn.textContent = 'Updating...';
+    if (waiting) {
+      waiting.postMessage({ type: 'SKIP_WAITING' });
+      return;
+    }
+    location.reload();
+  };
 }
 
 async function boot() {
   document.getElementById('driver-name-label').textContent = config.driver;
+  wireVersionBadgeCheck();
+  await updateVersionBadge();
   await refresh();
   startPolling();
   startTicking();
   wireAppEvents();
+}
+
+function setVersionBadge(text, isOutdated = false) {
+  const el = document.getElementById('app-version');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('outdated', isOutdated);
+}
+
+async function updateVersionBadge() {
+  let isOutdated = false;
+  let latest = APP_VERSION;
+  setVersionBadge(`${APP_VERSION} current`, false);
+
+  try {
+    const res = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) return { latest, isOutdated };
+    const payload = await res.json();
+    latest = String(payload?.version || '').trim();
+    if (!latest) return { latest: APP_VERSION, isOutdated };
+    latestPublishedVersion = latest;
+
+    if (latest !== APP_VERSION) {
+      isOutdated = true;
+      setVersionBadge(`${APP_VERSION} -> ${latest}`, true);
+      if (!swRegistration?.waiting) {
+        showUpdateBanner(
+          `Release ${latest} published. Tap Check now to request the new service worker.`,
+          'Check now',
+          checkForUpdatesFromBadge
+        );
+      }
+    }
+  } catch {
+    // Version check is informational only.
+  }
+
+  return { latest, isOutdated };
+}
+
+function wireVersionBadgeCheck() {
+  const badge = document.getElementById('app-version');
+  if (!badge) return;
+
+  badge.title = 'Tap to check for updates';
+  badge.onclick = checkForUpdatesFromBadge;
+}
+
+async function checkForUpdatesFromBadge() {
+  const badge = document.getElementById('app-version');
+  if (!badge) return;
+  if (badge.dataset.checking === '1') return;
+  badge.dataset.checking = '1';
+  setVersionBadge('Checking...', false);
+
+  try {
+    await swRegistration?.update();
+    if (swRegistration?.waiting) {
+      showUpdateBanner();
+      return;
+    }
+
+    const status = await updateVersionBadge();
+    if (!status.isOutdated) {
+      setVersionBadge(`${APP_VERSION} current`, false);
+      return;
+    }
+
+    showUpdateBanner(
+      `Still on ${APP_VERSION}. Latest is ${latestPublishedVersion}.`,
+      'Reload',
+      () => location.reload()
+    );
+  } finally {
+    badge.dataset.checking = '0';
+  }
 }
 
 // ---------------------------------------------------------------------

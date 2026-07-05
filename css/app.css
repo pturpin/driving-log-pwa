@@ -91,6 +91,28 @@ hr { border: none; border-top: 1px solid var(--surface-2); margin: 20px 0; }
 .error { color: var(--danger); font-size: 13px; }
 .hint { color: var(--text-muted); font-size: 13px; }
 
+.update-banner {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  left: 12px;
+  right: 12px;
+  z-index: 500;
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+}
+
+.update-banner .btn {
+  width: auto;
+  margin: 0;
+}
+
 /* ---------- Setup gate ---------- */
 .setup-screen {
   min-height: 100vh;
@@ -113,6 +135,24 @@ hr { border: none; border-top: 1px solid var(--surface-2); margin: 20px 0; }
   border-bottom: 1px solid var(--surface-2);
 }
 .driver-name { font-weight: 600; text-transform: capitalize; }
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.app-version {
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px solid var(--surface-2);
+  border-radius: 999px;
+  padding: 2px 8px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+.app-version.outdated {
+  color: var(--day);
+  border-color: var(--day);
+}
 .sync-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--day);
