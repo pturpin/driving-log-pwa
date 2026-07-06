@@ -4,7 +4,7 @@ import { splitDayNight, formatElapsed, formatMinutes, formatHoursDecimal, uid, f
 import { printLog, downloadBackup, parseBackup } from './export.js';
 import { getCutoffsForDate, hasSunConfig } from './sun.js';
 
-const APP_VERSION = 'v8';
+const APP_VERSION = 'v9';
 
 let config = loadConfig();
 let currentItem = null;
@@ -283,6 +283,7 @@ function startTicking() {
 function renderAll() {
   if (!currentItem) return;
   renderHome();
+  renderHeaderProgress();
   renderProgress();
   renderLog();
   renderSettingsForm();
@@ -340,6 +341,25 @@ function renderProgress() {
 
   nightEl.style.strokeDasharray = `${circumference * nightFrac} ${circumference}`;
   nightEl.style.strokeDashoffset = `${-circumference * dayFrac}`;
+}
+
+function renderHeaderProgress() {
+  const fill = document.getElementById('header-progress-fill');
+  const label = document.getElementById('header-progress-label');
+  if (!fill || !label) return;
+
+  const totals = computeTotals(currentItem.sessions);
+  const { goalTotalHours } = currentItem.settings;
+  const goalTotalMin = goalTotalHours * 60;
+  const frac = goalTotalMin > 0 ? Math.min(totals.totalMinutes / goalTotalMin, 1) : 0;
+
+  fill.style.width = `${frac * 100}%`;
+
+  const remainingMinutes = Math.max(goalTotalMin - totals.totalMinutes, 0);
+  label.textContent =
+    remainingMinutes > 0
+      ? `${formatHoursDecimal(remainingMinutes)} hrs left`
+      : 'Goal reached';
 }
 
 function computeTotals(sessions) {
@@ -490,13 +510,19 @@ async function splitDayNightForSession(start, end, settings) {
 
 function wireTabEvents() {
   document.querySelectorAll('.tab').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
-      document.querySelectorAll('.screen').forEach((s) => s.classList.add('hidden'));
-      tab.classList.add('active');
-      document.getElementById(`screen-${tab.dataset.screen}`).classList.remove('hidden');
-    });
+    tab.addEventListener('click', () => switchToTab(tab.dataset.screen));
   });
+
+  const headerProgress = document.getElementById('header-progress');
+  if (headerProgress) {
+    headerProgress.addEventListener('click', () => switchToTab('progress'));
+  }
+}
+
+function switchToTab(screenName) {
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.screen === screenName));
+  document.querySelectorAll('.screen').forEach((s) => s.classList.add('hidden'));
+  document.getElementById(`screen-${screenName}`).classList.remove('hidden');
 }
 
 // ---------------------------------------------------------------------

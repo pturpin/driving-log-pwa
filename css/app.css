@@ -128,11 +128,16 @@ hr { border: none; border-top: 1px solid var(--surface-2); margin: 20px 0; }
 
 .app-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 10px;
   padding: 14px 20px;
   padding-top: max(14px, env(safe-area-inset-top));
   border-bottom: 1px solid var(--surface-2);
+}
+.app-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .driver-name { font-weight: 600; text-transform: capitalize; }
 .header-status {
@@ -158,6 +163,40 @@ hr { border: none; border-top: 1px solid var(--surface-2); margin: 20px 0; }
   background: var(--day);
 }
 .sync-dot.offline { background: var(--danger); }
+
+.header-progress {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+.header-progress-track {
+  display: block;
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.header-progress-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: var(--day);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+.header-progress-label {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
 
 main { flex: 1; padding: 20px; padding-bottom: 90px; overflow-y: auto; }
 

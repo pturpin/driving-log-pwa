@@ -52,11 +52,19 @@
 <div id="app" class="hidden">
 
   <header class="app-header">
-    <span class="driver-name" id="driver-name-label"></span>
-    <div class="header-status">
-      <span class="app-version" id="app-version" title="App version"></span>
-      <span class="sync-dot" id="sync-dot" title="Synced"></span>
+    <div class="app-header-top">
+      <span class="driver-name" id="driver-name-label"></span>
+      <div class="header-status">
+        <span class="app-version" id="app-version" title="App version"></span>
+        <span class="sync-dot" id="sync-dot" title="Synced"></span>
+      </div>
     </div>
+    <button id="header-progress" class="header-progress" type="button">
+      <span class="header-progress-track">
+        <span class="header-progress-fill" id="header-progress-fill"></span>
+      </span>
+      <span class="header-progress-label" id="header-progress-label"></span>
+    </button>
   </header>
 
   <main id="main">
