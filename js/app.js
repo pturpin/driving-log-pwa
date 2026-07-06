@@ -4,15 +4,18 @@ import { splitDayNight, formatElapsed, formatMinutes, formatHoursDecimal, uid, f
 import { printLog, downloadBackup, parseBackup } from './export.js';
 import { getCutoffsForDate, hasSunConfig } from './sun.js';
 
-const APP_VERSION = 'v6';
+const APP_VERSION = 'v8';
 
 let config = loadConfig();
 let currentItem = null;
 let tickHandle = null;
 let pollHandle = null;
 let editingSessionId = null; // set when the entry modal is editing rather than adding
+let editingOriginalStart = null;
+let editingOriginalEnd = null;
 let swRegistration = null;
 let isRefreshingForUpdate = false;
+let isStopping = false;
 let latestPublishedVersion = APP_VERSION;
 
 // ---------------------------------------------------------------------
@@ -27,7 +30,7 @@ if (config) {
 }
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js')
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
     .then((registration) => {
       swRegistration = registration;
       wireUpdatePrompt(registration);
@@ -267,7 +270,7 @@ function startPolling() {
 function startTicking() {
   if (tickHandle) clearInterval(tickHandle);
   tickHandle = setInterval(() => {
-    if (currentItem && currentItem.active) {
+    if (currentItem && currentItem.active && !isStopping) {
       updateTimerDisplay();
     }
   }, 1000);
@@ -374,6 +377,7 @@ function renderLog() {
             <div class="log-split-day" style="width:${dayPct}%"></div>
             <div class="log-split-night" style="width:${nightPct}%"></div>
           </div>
+          ${s.note ? `<div class="log-row-note">${escapeHtml(s.note)}</div>` : ''}
           ${s.source === 'manual' ? '<span class="log-row-tag">Manually added</span>' : ''}
         </div>`;
     })
@@ -382,6 +386,12 @@ function renderLog() {
   list.querySelectorAll('.log-row').forEach((row) => {
     row.addEventListener('click', () => openEntryModal(row.dataset.id));
   });
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
 }
 
 function renderSettingsForm() {
@@ -499,14 +509,19 @@ function wireHomeEvents() {
     btn.disabled = true;
     try {
       if (currentItem.active) {
-        await stopDrive();
+        isStopping = true;
+        document.getElementById('timer-status').textContent = 'Stopping\u2026';
+        const newSessionId = await stopDrive();
+        await refresh();
+        openEntryModal(newSessionId);
       } else {
         await startDrive();
+        await refresh();
       }
-      await refresh();
     } catch (err) {
       alert(err.message || 'Something went wrong. Try again.');
     } finally {
+      isStopping = false;
       btn.disabled = false;
     }
   });
@@ -520,21 +535,24 @@ async function startDrive() {
 }
 
 async function stopDrive() {
+  const sessionId = uid();
   currentItem = await updateItem(config, async (item) => {
     if (!item.active) throw new Error('No drive is currently in progress.');
     const start = new Date(item.active.startedAt);
     const end = new Date();
     const { dayMinutes, nightMinutes } = await splitDayNightForSession(start, end, item.settings);
     const session = {
-      id: uid(),
+      id: sessionId,
       start: start.toISOString(),
       end: end.toISOString(),
       dayMinutes,
       nightMinutes,
+      note: undefined,
       source: 'live'
     };
     return { ...item, active: null, sessions: [...item.sessions, session] };
   });
+  return sessionId;
 }
 
 // ---------------------------------------------------------------------
@@ -575,16 +593,22 @@ function openEntryModal(sessionId) {
     deleteBtn.classList.remove('hidden');
     const start = new Date(s.start);
     const end = new Date(s.end);
+    editingOriginalStart = start;
+    editingOriginalEnd = end;
     document.getElementById('entry-date').value = toDateInputValue(start);
     document.getElementById('entry-start-time').value = toTimeInputValue(start);
     document.getElementById('entry-end-time').value = toTimeInputValue(end);
+    document.getElementById('entry-note').value = s.note || '';
   } else {
     title.textContent = 'Add Entry';
     deleteBtn.classList.add('hidden');
+    editingOriginalStart = null;
+    editingOriginalEnd = null;
     document.getElementById('entry-date').value = toDateInputValue(new Date());
     document.getElementById('entry-start-time').value = '';
     document.getElementById('entry-end-time').value = '';
     document.getElementById('entry-duration').value = '';
+    document.getElementById('entry-note').value = '';
   }
 
   modal.classList.remove('hidden');
@@ -593,6 +617,8 @@ function openEntryModal(sessionId) {
 function closeEntryModal() {
   document.getElementById('entry-modal').classList.add('hidden');
   editingSessionId = null;
+  editingOriginalStart = null;
+  editingOriginalEnd = null;
 }
 
 function toDateInputValue(d) {
@@ -640,9 +666,27 @@ async function saveEntry() {
       errEl.classList.remove('hidden');
       return;
     }
-    start = new Date(`${dateStr}T${startTime}:00`);
-    end = new Date(`${dateStr}T${endTime}:00`);
-    if (end <= start) end = new Date(end.getTime() + 24 * 3600000); // crossed midnight
+
+    const fieldsUnchanged =
+      editingSessionId &&
+      editingOriginalStart &&
+      editingOriginalEnd &&
+      dateStr === toDateInputValue(editingOriginalStart) &&
+      startTime === toTimeInputValue(editingOriginalStart) &&
+      endTime === toTimeInputValue(editingOriginalEnd);
+
+    if (fieldsUnchanged) {
+      // Sub-minute precision would otherwise be lost by the HH:MM inputs —
+      // if the user didn't touch the time fields, keep the exact original
+      // timestamps rather than reconstructing (and misfiring the
+      // crossed-midnight guess below for very short sessions).
+      start = editingOriginalStart;
+      end = editingOriginalEnd;
+    } else {
+      start = new Date(`${dateStr}T${startTime}:00`);
+      end = new Date(`${dateStr}T${endTime}:00`);
+      if (end < start) end = new Date(end.getTime() + 24 * 3600000); // crossed midnight
+    }
   }
 
   if (end <= start) {
@@ -650,6 +694,8 @@ async function saveEntry() {
     errEl.classList.remove('hidden');
     return;
   }
+
+  const note = document.getElementById('entry-note').value.trim();
 
   try {
     currentItem = await updateItem(config, async (item) => {
@@ -660,6 +706,7 @@ async function saveEntry() {
         end: end.toISOString(),
         dayMinutes,
         nightMinutes,
+        note: note || undefined,
         source: editingSessionId
           ? item.sessions.find((x) => x.id === editingSessionId)?.source || 'manual'
           : 'manual'

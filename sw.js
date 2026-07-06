@@ -4,14 +4,16 @@
 // must always come from a live network request to DynamoDB, never from a
 // stale cache.
 //
-// Cache name is derived from version.json at install time rather than a
-// hardcoded constant here — version.json is the single source of truth for
-// "what's the latest published release." Bump it there and this worker
-// automatically busts its cache on the next install, with no other file to
-// remember to edit.
+// IMPORTANT: browsers detect a service worker update by byte-comparing this
+// script file against the previously installed one. If this file's bytes
+// never change between releases, `registration.update()` will never find
+// anything new, no matter how much version.json or the app's own code
+// changes. SW_VERSION exists purely to force that byte change — bump it on
+// every release, alongside APP_VERSION in js/app.js and version.json.
+const SW_VERSION = 'v8';
 
 const CACHE_PREFIX = 'drivelog-shell';
-const FALLBACK_VERSION = 'unknown';
+const FALLBACK_VERSION = SW_VERSION;
 const SHELL_ASSETS = [
   './',
   './index.html',

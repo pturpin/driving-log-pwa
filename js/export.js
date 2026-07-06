@@ -1,5 +1,14 @@
 import { formatDate, formatTime, formatMinutes } from './utils.js';
 
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /**
  * Opens a new window with a print-friendly log — date, times, day/night
  * split, running totals, and a signature line. Uses the browser's native
@@ -24,6 +33,7 @@ export function printLog(item) {
           <td>${formatMinutes(s.dayMinutes)}</td>
           <td>${formatMinutes(s.nightMinutes)}</td>
           <td>${s.source === 'manual' ? 'Manual' : 'Logged'}</td>
+          <td>${s.note ? escapeHtml(s.note) : ''}</td>
         </tr>`;
     })
     .join('');
@@ -57,11 +67,11 @@ export function printLog(item) {
       <div class="meta">Driver: ${item.driverId} &nbsp;•&nbsp; Printed ${new Date().toLocaleDateString()}</div>
       <table>
         <thead>
-          <tr><th>Date</th><th>Time</th><th>Day</th><th>Night</th><th>Type</th></tr>
+          <tr><th>Date</th><th>Time</th><th>Day</th><th>Night</th><th>Type</th><th>Note</th></tr>
         </thead>
         <tbody>${rows}</tbody>
         <tfoot>
-          <tr><td colspan="2">Total</td><td>${formatMinutes(totalDay)}</td><td>${formatMinutes(totalNight)}</td><td></td></tr>
+          <tr><td colspan="2">Total</td><td>${formatMinutes(totalDay)}</td><td>${formatMinutes(totalNight)}</td><td></td><td></td></tr>
         </tfoot>
       </table>
       <div class="sig">
