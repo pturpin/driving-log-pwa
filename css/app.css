@@ -269,6 +269,50 @@ main { flex: 1; padding: 20px; padding-bottom: 90px; overflow-y: auto; }
 .dot-day { background: var(--day); }
 .dot-night { background: var(--night); }
 
+/* ---------- Weekly chart ---------- */
+.weekly-chart-wrap { margin-top: 8px; max-width: 420px; margin-left: auto; margin-right: auto; }
+.weekly-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+}
+.week-bar-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.week-bar-total {
+  font-size: 10px;
+  color: var(--text-muted);
+  min-height: 12px;
+}
+.week-bar-track {
+  width: 100%;
+  max-width: 28px;
+  height: 120px;
+  background: var(--surface-2);
+  border-radius: 4px 4px 2px 2px;
+  display: flex;
+  flex-direction: column-reverse;
+  overflow: hidden;
+}
+.week-bar-day { width: 100%; background: var(--day); }
+.week-bar-night { width: 100%; background: var(--night); }
+.week-bar-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: nowrap;
+}
+.week-bar-col.is-current .week-bar-label {
+  color: var(--day);
+  font-weight: 600;
+}
+
 /* ---------- Log ---------- */
 .log-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .log-header h2 { margin: 0; }

@@ -4,7 +4,7 @@ import { splitDayNight, formatElapsed, formatMinutes, formatHoursDecimal, uid, f
 import { printLog, downloadBackup, parseBackup } from './export.js';
 import { getCutoffsForDate, hasSunConfig } from './sun.js';
 
-const APP_VERSION = 'v9';
+const APP_VERSION = 'v0.11';
 
 let config = loadConfig();
 let currentItem = null;
@@ -341,6 +341,65 @@ function renderProgress() {
 
   nightEl.style.strokeDasharray = `${circumference * nightFrac} ${circumference}`;
   nightEl.style.strokeDashoffset = `${-circumference * dayFrac}`;
+
+  renderWeeklyChart();
+}
+
+function startOfWeek(date) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffToMonday = (d.getDay() + 6) % 7; // Monday-start weeks
+  d.setDate(d.getDate() - diffToMonday);
+  return d;
+}
+
+function computeWeeklyTotals(sessions, weeksCount = 8) {
+  const currentWeekStart = startOfWeek(new Date());
+  const weeks = [];
+  for (let i = weeksCount - 1; i >= 0; i--) {
+    const weekStart = new Date(currentWeekStart);
+    weekStart.setDate(weekStart.getDate() - i * 7);
+    weeks.push({ start: weekStart, dayMinutes: 0, nightMinutes: 0 });
+  }
+
+  const indexByWeekStart = new Map(weeks.map((w, idx) => [w.start.getTime(), idx]));
+
+  for (const s of sessions) {
+    const weekStart = startOfWeek(new Date(s.start));
+    const idx = indexByWeekStart.get(weekStart.getTime());
+    if (idx === undefined) continue; // outside the displayed range
+    weeks[idx].dayMinutes += s.dayMinutes || 0;
+    weeks[idx].nightMinutes += s.nightMinutes || 0;
+  }
+
+  return weeks;
+}
+
+function renderWeeklyChart() {
+  const container = document.getElementById('weekly-chart');
+  if (!container) return;
+
+  const weeks = computeWeeklyTotals(currentItem.sessions, 8);
+  const maxMinutes = Math.max(...weeks.map((w) => w.dayMinutes + w.nightMinutes), 60);
+  const currentWeekStart = startOfWeek(new Date()).getTime();
+
+  container.innerHTML = weeks
+    .map((w) => {
+      const total = w.dayMinutes + w.nightMinutes;
+      const dayPct = (w.dayMinutes / maxMinutes) * 100;
+      const nightPct = (w.nightMinutes / maxMinutes) * 100;
+      const label = w.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const isCurrent = w.start.getTime() === currentWeekStart;
+      return `
+        <div class="week-bar-col${isCurrent ? ' is-current' : ''}" title="Week of ${label}: ${formatHoursDecimal(total)} hrs">
+          <span class="week-bar-total mono">${total > 0 ? formatHoursDecimal(total) : ''}</span>
+          <div class="week-bar-track">
+            <div class="week-bar-day" style="height:${dayPct}%"></div>
+            <div class="week-bar-night" style="height:${nightPct}%"></div>
+          </div>
+          <span class="week-bar-label">${label}</span>
+        </div>`;
+    })
+    .join('');
 }
 
 function renderHeaderProgress() {
