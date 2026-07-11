@@ -10,7 +10,7 @@
 // anything new, no matter how much version.json or the app's own code
 // changes. SW_VERSION exists purely to force that byte change — bump it on
 // every release, alongside APP_VERSION in js/app.js and version.json.
-const SW_VERSION = 'v0.11';
+const SW_VERSION = 'v0.13';
 
 const CACHE_PREFIX = 'drivelog-shell';
 const FALLBACK_VERSION = SW_VERSION;

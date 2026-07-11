@@ -83,6 +83,42 @@ input, textarea, select {
 }
 textarea { resize: vertical; }
 
+.password-field {
+  position: relative;
+}
+.password-field input {
+  padding-right: 44px;
+}
+.password-toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 42px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.password-toggle:focus-visible {
+  outline: 2px solid var(--day);
+  outline-offset: -3px;
+  border-radius: 8px;
+}
+.password-toggle svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 #astro-location-fields {
   margin-top: 10px;
 }

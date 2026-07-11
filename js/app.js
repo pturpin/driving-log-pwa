@@ -4,7 +4,7 @@ import { splitDayNight, formatElapsed, formatMinutes, formatHoursDecimal, uid, f
 import { printLog, downloadBackup, parseBackup } from './export.js';
 import { getCutoffsForDate, hasSunConfig } from './sun.js';
 
-const APP_VERSION = 'v0.11';
+const APP_VERSION = 'v0.13';
 
 let config = loadConfig();
 let currentItem = null;
@@ -193,6 +193,19 @@ function showApp() {
 function wireSetupEvents() {
   const pasteBox = document.getElementById('setup-paste');
   const advBox = document.getElementById('setup-advanced');
+  const setupCodeInput = document.getElementById('setup-code-input');
+  const setupCodeToggle = document.getElementById('toggle-setup-code');
+
+  setupCodeToggle.addEventListener('click', () => {
+    const reveal = setupCodeInput.type === 'password';
+    setupCodeInput.type = reveal ? 'text' : 'password';
+    setupCodeToggle.querySelector('.icon-eye').classList.toggle('hidden', reveal);
+    setupCodeToggle.querySelector('.icon-eye-off').classList.toggle('hidden', !reveal);
+    const action = reveal ? 'Hide' : 'Show';
+    setupCodeToggle.setAttribute('aria-label', `${action} setup code`);
+    setupCodeToggle.title = `${action} setup code`;
+    setupCodeInput.focus();
+  });
 
   document.getElementById('show-advanced').addEventListener('click', () => {
     pasteBox.classList.add('hidden');
@@ -203,10 +216,11 @@ function wireSetupEvents() {
     pasteBox.classList.remove('hidden');
   });
 
-  document.getElementById('setup-code-submit').addEventListener('click', () => {
+  pasteBox.addEventListener('submit', (event) => {
+    event.preventDefault();
     const errEl = document.getElementById('setup-error');
     errEl.classList.add('hidden');
-    const raw = document.getElementById('setup-code-input').value;
+    const raw = setupCodeInput.value;
     try {
       const decoded = decodeSetupCode(raw);
       saveConfig(decoded);
