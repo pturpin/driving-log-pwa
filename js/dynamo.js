@@ -67,7 +67,8 @@ export async function readItem(config) {
  * Read-modify-write with optimistic concurrency.
  * `mutator(currentItem)` receives a full current item (never mutate it in
  * place — return a new object) and should return the new item, EXCLUDING
- * `version` (that's managed here).
+ * `version` (that's managed here). Returning the exact `currentItem` object
+ * signals a no-op and skips the DynamoDB write and version bump.
  *
  * Retries automatically if another device wrote in between.
  */
@@ -77,6 +78,8 @@ export async function updateItem(config, mutator, maxRetries = 3) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const current = await readItem(config);
     const draft = await mutator(current);
+    if (draft === current) return current;
+
     const nextVersion = (current.version || 0) + 1;
     const newItem = { ...draft, driverId: config.driver, version: nextVersion };
 

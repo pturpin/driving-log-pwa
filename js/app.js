@@ -13,6 +13,8 @@ let pollHandle = null;
 let editingSessionId = null; // set when the entry modal is editing rather than adding
 let editingOriginalStart = null;
 let editingOriginalEnd = null;
+let isEntryMutationBusy = false;
+let entryModalControlDisabledStates = null;
 let swRegistration = null;
 let isRefreshingForUpdate = false;
 let isStopping = false;
@@ -259,7 +261,12 @@ function wireSetupEvents() {
 
 async function refresh() {
   try {
-    currentItem = await readItem(config);
+    const refreshedItem = await readItem(config);
+    if (currentItem && (refreshedItem.version || 0) < (currentItem.version || 0)) {
+      setSyncStatus(true);
+      return;
+    }
+    currentItem = refreshedItem;
     setSyncStatus(true);
     renderAll();
   } catch (err) {
@@ -635,10 +642,11 @@ async function startDrive() {
 
 async function stopDrive() {
   const sessionId = uid();
+  const end = new Date();
   currentItem = await updateItem(config, async (item) => {
+    if (item.sessions.some((session) => session.id === sessionId)) return item;
     if (!item.active) throw new Error('No drive is currently in progress.');
     const start = new Date(item.active.startedAt);
-    const end = new Date();
     const { dayMinutes, nightMinutes } = await splitDayNightForSession(start, end, item.settings);
     const session = {
       id: sessionId,
@@ -670,6 +678,7 @@ function wireEntryModalEvents() {
 }
 
 function setEntryMode(mode) {
+  if (isEntryMutationBusy) return;
   document.getElementById('mode-times').classList.toggle('active', mode === 'times');
   document.getElementById('mode-duration').classList.toggle('active', mode === 'duration');
   document.getElementById('entry-times-fields').classList.toggle('hidden', mode !== 'times');
@@ -677,6 +686,7 @@ function setEntryMode(mode) {
 }
 
 function openEntryModal(sessionId) {
+  if (isEntryMutationBusy) return;
   editingSessionId = sessionId;
   const modal = document.getElementById('entry-modal');
   const errEl = document.getElementById('entry-error');
@@ -714,10 +724,31 @@ function openEntryModal(sessionId) {
 }
 
 function closeEntryModal() {
+  if (isEntryMutationBusy) return;
   document.getElementById('entry-modal').classList.add('hidden');
   editingSessionId = null;
   editingOriginalStart = null;
   editingOriginalEnd = null;
+}
+
+function setEntryMutationBusy(isBusy) {
+  if (isBusy === isEntryMutationBusy) return;
+
+  const controls = document.querySelectorAll('#entry-modal button, #entry-modal input, #entry-modal select, #entry-modal textarea');
+  if (isBusy) {
+    entryModalControlDisabledStates = new Map();
+    controls.forEach((control) => {
+      entryModalControlDisabledStates.set(control, control.disabled);
+      control.disabled = true;
+    });
+  } else {
+    controls.forEach((control) => {
+      control.disabled = entryModalControlDisabledStates?.get(control) ?? false;
+    });
+    entryModalControlDisabledStates = null;
+  }
+
+  isEntryMutationBusy = isBusy;
 }
 
 function toDateInputValue(d) {
@@ -730,6 +761,8 @@ function toTimeInputValue(d) {
 }
 
 async function saveEntry() {
+  if (isEntryMutationBusy) return;
+
   const errEl = document.getElementById('entry-error');
   errEl.classList.add('hidden');
 
@@ -795,42 +828,91 @@ async function saveEntry() {
   }
 
   const note = document.getElementById('entry-note').value.trim();
+  const targetSessionId = editingSessionId;
+  const sessionId = targetSessionId || uid();
+  const startTimestamp = start.toISOString();
+  const endTimestamp = end.toISOString();
+  const savedNote = note || undefined;
 
+  let updatedItem;
+  let writeSucceeded = false;
+  setEntryMutationBusy(true);
   try {
-    currentItem = await updateItem(config, async (item) => {
-      const { dayMinutes, nightMinutes } = await splitDayNightForSession(start, end, item.settings);
+    updatedItem = await updateItem(config, async (item) => {
+      if (!targetSessionId && item.sessions.some((session) => session.id === sessionId)) return item;
+
+      const existingSession = targetSessionId
+        ? item.sessions.find((session) => session.id === targetSessionId)
+        : null;
+      if (targetSessionId && !existingSession) {
+        throw new Error('This entry no longer exists. It may have been deleted on another device.');
+      }
+
+      const sessionStart = new Date(startTimestamp);
+      const sessionEnd = new Date(endTimestamp);
+      const { dayMinutes, nightMinutes } = await splitDayNightForSession(
+        sessionStart,
+        sessionEnd,
+        item.settings
+      );
       const newSession = {
-        id: editingSessionId || uid(),
-        start: start.toISOString(),
-        end: end.toISOString(),
+        id: sessionId,
+        start: startTimestamp,
+        end: endTimestamp,
         dayMinutes,
         nightMinutes,
-        note: note || undefined,
-        source: editingSessionId
-          ? item.sessions.find((x) => x.id === editingSessionId)?.source || 'manual'
-          : 'manual'
+        note: savedNote,
+        source: existingSession?.source || 'manual'
       };
-      const sessions = editingSessionId
-        ? item.sessions.map((x) => (x.id === editingSessionId ? newSession : x))
+      const sessions = targetSessionId
+        ? item.sessions.map((session) => (session.id === targetSessionId ? newSession : session))
         : [...item.sessions, newSession];
       return { ...item, sessions };
     });
-    closeEntryModal();
-    renderAll();
+    writeSucceeded = true;
   } catch (err) {
     errEl.textContent = err.message || 'Could not save. Try again.';
     errEl.classList.remove('hidden');
+  } finally {
+    setEntryMutationBusy(false);
   }
+
+  if (!writeSucceeded) return;
+  currentItem = updatedItem;
+  closeEntryModal();
+  renderAll();
 }
 
 async function deleteEntry() {
+  if (isEntryMutationBusy) return;
   if (!editingSessionId) return;
   if (!confirm('Delete this entry? This can\'t be undone.')) return;
+
   const idToDelete = editingSessionId;
-  currentItem = await updateItem(config, (item) => ({
-    ...item,
-    sessions: item.sessions.filter((x) => x.id !== idToDelete)
-  }));
+  const errEl = document.getElementById('entry-error');
+  errEl.classList.add('hidden');
+
+  let updatedItem;
+  let writeSucceeded = false;
+  setEntryMutationBusy(true);
+  try {
+    updatedItem = await updateItem(config, (item) => {
+      if (!item.sessions.some((session) => session.id === idToDelete)) return item;
+      return {
+        ...item,
+        sessions: item.sessions.filter((session) => session.id !== idToDelete)
+      };
+    });
+    writeSucceeded = true;
+  } catch (err) {
+    errEl.textContent = err.message || 'Could not delete. Try again.';
+    errEl.classList.remove('hidden');
+  } finally {
+    setEntryMutationBusy(false);
+  }
+
+  if (!writeSucceeded) return;
+  currentItem = updatedItem;
   closeEntryModal();
   renderAll();
 }
