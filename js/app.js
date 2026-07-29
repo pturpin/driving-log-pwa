@@ -4,7 +4,7 @@ import { splitDayNight, formatElapsed, formatMinutes, formatHoursDecimal, uid, f
 import { printLog, downloadBackup, parseBackup } from './export.js';
 import { getCutoffsForDate, hasSunConfig } from './sun.js';
 
-const APP_VERSION = 'v0.13';
+const APP_VERSION = 'v0.14';
 
 let config = loadConfig();
 let currentItem = null;
