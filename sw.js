@@ -1,23 +1,12 @@
-// Minimal app-shell service worker.
-// Caches only the static shell (HTML/CSS/JS/icons/manifest) so the app can
-// launch offline. It deliberately does NOT cache anything else — drive data
-// must always come from a live network request to DynamoDB, never from a
-// stale cache.
-//
-// IMPORTANT: browsers detect a service worker update by byte-comparing this
-// script file against the previously installed one. If this file's bytes
-// never change between releases, `registration.update()` will never find
-// anything new, no matter how much version.json or the app's own code
-// changes. SW_VERSION exists purely to force that byte change — bump it on
-// every release, alongside APP_VERSION in js/app.js and version.json.
-const SW_VERSION = 'v0.16';
-
+const SW_VERSION = 'v0.17';
 const CACHE_PREFIX = 'drivelog-shell';
-const FALLBACK_VERSION = SW_VERSION;
+const CACHE_NAME = `${CACHE_PREFIX}-${SW_VERSION}`;
+
 const SHELL_ASSETS = [
   './',
   './index.html',
   './manifest.json',
+  './version.json',
   './css/app.css',
   './js/app.js',
   './js/config.js',
@@ -25,65 +14,73 @@ const SHELL_ASSETS = [
   './js/dynamo.js',
   './js/sun.js',
   './js/export.js',
+  './js/conflicts.js',
+  './js/local-store.js',
+  './js/log-repository.js',
+  './js/vendor/aws-sdk.js',
+  './js/vendor/MANIFEST.md',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];
 
-async function resolveCacheName() {
-  try {
-    const res = await fetch('./version.json', { cache: 'no-store' });
-    const payload = await res.json();
-    const version = String(payload?.version || '').trim();
-    return `${CACHE_PREFIX}-${version || FALLBACK_VERSION}`;
-  } catch {
-    return `${CACHE_PREFIX}-${FALLBACK_VERSION}`;
-  }
-}
+const IMMUTABLE_PATHS = new Set(
+  SHELL_ASSETS
+    .filter((asset) => asset !== './' && asset !== './index.html' && asset !== './version.json')
+    .map((asset) => new URL(asset, self.location.href).pathname)
+);
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    resolveCacheName().then((cacheName) =>
-      caches.open(cacheName).then((cache) => cache.addAll(SHELL_ASSETS))
+    caches.open(CACHE_NAME).then((cache) =>
+      cache.addAll(SHELL_ASSETS.map((asset) => new Request(asset, { cache: 'reload' })))
     )
   );
 });
 
 self.addEventListener('message', (event) => {
-  if (event.data?.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    resolveCacheName().then((currentCacheName) =>
-      caches.keys().then((keys) =>
-        Promise.all(
-          keys
-            .filter((k) => k.startsWith(CACHE_PREFIX) && k !== currentCacheName)
-            .map((k) => caches.delete(k))
-        )
-      )
-    )
+    caches.keys()
+      .then((keys) => Promise.all(
+        keys
+          .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME)
+          .map((key) => caches.delete(key))
+      ))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+async function networkFirst(request, fallbackUrl) {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    const response = await fetch(request);
+    if (response.ok) cache.put(request, response.clone());
+    return response;
+  } catch {
+    return (await cache.match(request)) ||
+      (fallbackUrl ? await cache.match(fallbackUrl) : undefined) ||
+      Response.error();
+  }
+}
 
-  // Only intercept same-origin GET requests for shell assets.
-  // Everything else (AWS SDK CDN imports, DynamoDB/Cognito calls) passes
-  // straight through to the network, uncached.
-  if (
-    event.request.method !== 'GET' ||
-    url.origin !== self.location.origin ||
-    url.pathname === new URL('./version.json', self.location.href).pathname
-  ) {
+self.addEventListener('fetch', (event) => {
+  const request = event.request;
+  const url = new URL(request.url);
+  if (request.method !== 'GET' || url.origin !== self.location.origin) return;
+
+  if (request.mode === 'navigate') {
+    event.respondWith(networkFirst(request, './index.html'));
     return;
   }
-
-  event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
-  );
+  if (url.pathname.endsWith('/version.json')) return;
+  if (IMMUTABLE_PATHS.has(url.pathname)) {
+    event.respondWith(
+      caches.open(CACHE_NAME).then(async (cache) =>
+        (await cache.match(request)) || fetch(request)
+      )
+    );
+  }
 });

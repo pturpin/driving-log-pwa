@@ -1,78 +1,75 @@
-// Per-device configuration: which AWS region/identity pool/table/driver
-// this install talks to. Lives only in localStorage — deliberately not
-// synced, since it's device identity, not logbook data.
+import { safeJsonParse } from './utils.js';
 
 const STORAGE_KEY = 'drivelog.config.v1';
 const CODE_PREFIX = 'dlog1.';
+const REGION_RE = /^[a-z0-9-]{1,32}$/;
+const IDENTITY_POOL_RE = /^[a-z0-9-]+:[0-9a-f-]{36}$/;
+const TABLE_RE = /^[A-Za-z0-9_.-]{3,255}$/;
+const DRIVER_RE = /^[A-Za-z0-9 ._-]{1,64}$/;
 
-/** @returns {{region:string, idp:string, table:string, driver:string}|null} */
+export function validateConfig(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('Configuration is invalid.');
+  }
+  const region = typeof input.region === 'string' ? input.region.trim() : '';
+  const idp = typeof input.idp === 'string' ? input.idp.trim() : '';
+  const table = typeof input.table === 'string' ? input.table.trim() : '';
+  const driver = typeof input.driver === 'string' ? input.driver.trim() : '';
+  if (!REGION_RE.test(region)) throw new Error('AWS region is invalid.');
+  if (!IDENTITY_POOL_RE.test(idp)) throw new Error('Cognito Identity Pool ID is invalid.');
+  if (!TABLE_RE.test(table)) throw new Error('DynamoDB table name is invalid.');
+  if (!DRIVER_RE.test(driver)) throw new Error('Driver name is invalid.');
+  return { region, idp, table, driver };
+}
+
 export function loadConfig() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed.region || !parsed.idp || !parsed.table || !parsed.driver) return null;
-    return parsed;
+    return validateConfig(safeJsonParse(raw));
   } catch {
     return null;
   }
 }
 
 export function saveConfig(config) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  const validated = validateConfig(config);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(validated));
+  return validated;
 }
 
 export function clearConfig() {
   localStorage.removeItem(STORAGE_KEY);
 }
 
-/** Encode a config object into a shareable setup code. */
 export function encodeSetupCode(config) {
-  const json = JSON.stringify({
-    region: config.region,
-    idp: config.idp,
-    table: config.table,
-    driver: config.driver
-  });
-  const b64 = btoa(unescape(encodeURIComponent(json)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+  const validated = validateConfig(config);
+  const json = JSON.stringify(validated);
+  const bytes = new TextEncoder().encode(json);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  const b64 = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   return CODE_PREFIX + b64;
 }
 
-/**
- * Decode a setup code pasted by the user.
- * @throws {Error} with a human-readable message if the code is invalid.
- */
 export function decodeSetupCode(code) {
-  const trimmed = (code || '').trim();
+  const trimmed = typeof code === 'string' ? code.trim() : '';
   if (!trimmed.startsWith(CODE_PREFIX)) {
     throw new Error('That doesn\'t look like a setup code (should start with "dlog1.").');
   }
-  const b64 = trimmed
-    .slice(CODE_PREFIX.length)
-    .replace(/-/g, '+')
-    .replace(/_/g, '/');
-  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
-
-  let json;
-  try {
-    json = decodeURIComponent(escape(atob(padded)));
-  } catch {
+  const encoded = trimmed.slice(CODE_PREFIX.length);
+  if (!/^[A-Za-z0-9_-]{8,4096}$/.test(encoded)) {
     throw new Error('Setup code is corrupted — try copying it again.');
   }
-
+  const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
   let parsed;
   try {
-    parsed = JSON.parse(json);
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    parsed = safeJsonParse(new TextDecoder().decode(bytes));
   } catch {
     throw new Error('Setup code is corrupted — try copying it again.');
   }
-
-  const { region, idp, table, driver } = parsed;
-  if (!region || !idp || !table || !driver) {
-    throw new Error('Setup code is missing required fields.');
-  }
-  return { region, idp, table, driver };
+  return validateConfig(parsed);
 }

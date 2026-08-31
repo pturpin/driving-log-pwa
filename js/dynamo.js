@@ -1,26 +1,40 @@
-// Talks to DynamoDB directly from the browser using short-lived Cognito
-// guest credentials — no custom backend, no long-lived secret shipped
-// in this bundle.
-//
-// Loaded from esm.sh as ES modules. If you'd rather self-host these
-// (e.g. no external CDN allowed on your network), download the same
-// packages and adjust these three import URLs to point at your own copy.
-
 import {
   DynamoDBClient,
   GetItemCommand,
-  PutItemCommand
-} from 'https://esm.sh/@aws-sdk/client-dynamodb@3?bundle';
-import { fromCognitoIdentityPool } from 'https://esm.sh/@aws-sdk/credential-provider-cognito-identity@3?bundle';
-import { marshall, unmarshall } from 'https://esm.sh/@aws-sdk/util-dynamodb@3?bundle';
+  PutItemCommand,
+  fromCognitoIdentityPool,
+  marshall,
+  unmarshall
+} from './vendor/aws-sdk.js';
+import {
+  emptyDocument,
+  SCHEMA_VERSION,
+  normalizeRemoteDocument,
+  serializeRemoteDocument,
+  serializedByteLength,
+  MAX_REMOTE_BYTES
+} from './utils.js';
 
 let cachedClient = null;
 let cachedConfigKey = null;
 
+const LOSSLESS_REPAIR_ISSUES = new Set([
+  'legacy-active',
+  'legacy-session-change',
+  'missing-setting',
+  'session-metadata-repair'
+]);
+
+export class ConditionalWriteError extends Error {
+  constructor() {
+    super('The shared log changed while saving.');
+    this.name = 'ConditionalWriteError';
+  }
+}
+
 function getClient(config) {
   const key = `${config.region}|${config.idp}`;
   if (cachedClient && cachedConfigKey === key) return cachedClient;
-
   cachedClient = new DynamoDBClient({
     region: config.region,
     credentials: fromCognitoIdentityPool({
@@ -32,84 +46,131 @@ function getClient(config) {
   return cachedClient;
 }
 
-/** Default shape for a driver who has no item yet. */
-function emptyItem(driverId) {
-  return {
-    driverId,
-    version: 0,
-    active: null,
-    sessions: [],
-    settings: {
-      goalTotalHours: 50,
-      goalNightHours: 10,
-      dayStartHour: 6,
-      nightStartHour: 20,
-      useAstronomicalSun: true,
-      latitude: null,
-      longitude: null
-    }
-  };
+function safeNetworkError(error, fallback) {
+  if (error instanceof ConditionalWriteError) return error;
+  const result = new Error(fallback);
+  result.name = error?.name || 'RemoteError';
+  result.retryable = true;
+  return result;
 }
 
-/** Read the current item for this device's driver, or a fresh default if none exists. */
-export async function readItem(config) {
-  const client = getClient(config);
-  const res = await client.send(
-    new GetItemCommand({
+async function getRawItem(config) {
+  try {
+    const response = await getClient(config).send(new GetItemCommand({
       TableName: config.table,
       Key: marshall({ driverId: config.driver })
-    })
-  );
-  return res.Item ? unmarshall(res.Item) : emptyItem(config.driver);
+    }));
+    return response.Item ? unmarshall(response.Item) : null;
+  } catch (error) {
+    throw safeNetworkError(error, 'Could not reach the shared logbook.');
+  }
+}
+
+export async function writeItem(config, document, expectedVersion, exists = true) {
+  if (serializedByteLength(document) >= MAX_REMOTE_BYTES) {
+    throw new Error('The shared logbook is too large for DynamoDB. Export a backup before making more changes.');
+  }
+  const next = {
+    ...document,
+    driverId: config.driver,
+    version: expectedVersion + 1
+  };
+  const item = serializeRemoteDocument(next);
+  const input = {
+    TableName: config.table,
+    Item: marshall(item, { removeUndefinedValues: true }),
+    ConditionExpression: exists ? '#version = :expected' : 'attribute_not_exists(driverId)'
+  };
+  if (exists) {
+    input.ExpressionAttributeNames = { '#version': 'version' };
+    input.ExpressionAttributeValues = marshall({ ':expected': expectedVersion });
+  }
+  try {
+    await getClient(config).send(new PutItemCommand(input));
+    return next;
+  } catch (error) {
+    const isConditionFailure =
+      error?.name === 'ConditionalCheckFailedException' ||
+      String(error?.__type || '').includes('ConditionalCheckFailedException');
+    if (isConditionFailure) throw new ConditionalWriteError();
+    throw safeNetworkError(error, 'The shared logbook write did not receive a confirmed response.');
+  }
+}
+
+export function isLosslessAutomaticRepair(normalized) {
+  return normalized.changed &&
+    normalized.document.quarantine.length === 0 &&
+    normalized.issues.every((issue) => LOSSLESS_REPAIR_ISSUES.has(issue.code));
 }
 
 /**
- * Read-modify-write with optimistic concurrency.
- * `mutator(currentItem)` receives a full current item (never mutate it in
- * place — return a new object) and should return the new item, EXCLUDING
- * `version` (that's managed here). Returning the exact `currentItem` object
- * signals a no-op and skips the DynamoDB write and version bump.
- *
- * Retries automatically if another device wrote in between.
+ * Reads, validates, migrates, and repairs the remote document. Invalid records
+ * are quarantined in the returned issue list and never persisted locally or
+ * written back.
  */
-export async function updateItem(config, mutator, maxRetries = 3) {
-  const client = getClient(config);
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const current = await readItem(config);
-    const draft = await mutator(current);
-    if (draft === current) return current;
-
-    const nextVersion = (current.version || 0) + 1;
-    const newItem = { ...draft, driverId: config.driver, version: nextVersion };
-
-    const isNew = current.version === 0 && current.sessions.length === 0 && !current.active;
-
+export async function readItem(config, previous = null, maxRepairRetries = 2) {
+  for (let attempt = 0; attempt <= maxRepairRetries; attempt++) {
+    const raw = await getRawItem(config);
+    if (!raw) {
+      return {
+        document: emptyDocument(config.driver),
+        exists: false,
+        issues: [],
+        repaired: false,
+        repairBlocked: false
+      };
+    }
+    const normalized = normalizeRemoteDocument(raw, {
+      driverId: config.driver,
+      previous,
+      now: new Date().toISOString()
+    });
+    if (normalized.document.schemaVersion > SCHEMA_VERSION ||
+        normalized.issues.some((issue) => issue.code === 'invalid-version')) {
+      return {
+        document: normalized.document,
+        exists: true,
+        issues: normalized.issues,
+        repaired: false,
+        repairBlocked: normalized.changed
+      };
+    }
+    if (!normalized.changed) {
+      return {
+        document: normalized.document,
+        exists: true,
+        issues: normalized.issues,
+        repaired: false,
+        repairBlocked: false
+      };
+    }
+    if (!isLosslessAutomaticRepair(normalized)) {
+      return {
+        document: normalized.document,
+        exists: true,
+        issues: normalized.issues,
+        repaired: false,
+        repairBlocked: true
+      };
+    }
     try {
-      await client.send(
-        new PutItemCommand({
-          TableName: config.table,
-          Item: marshall(newItem, { removeUndefinedValues: true }),
-          ConditionExpression: isNew
-            ? 'attribute_not_exists(driverId)'
-            : 'version = :expected',
-          ExpressionAttributeValues: isNew
-            ? undefined
-            : marshall({ ':expected': current.version })
-        })
+      const repaired = await writeItem(
+        config,
+        normalized.document,
+        normalized.document.version,
+        true
       );
-      return newItem;
-    } catch (err) {
-      const isConditionFailure =
-        err?.name === 'ConditionalCheckFailedException' ||
-        err?.__type?.includes('ConditionalCheckFailedException');
-      if (isConditionFailure && attempt < maxRetries) {
-        // Someone else wrote first — small backoff, then re-read and retry.
-        await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
-        continue;
-      }
-      throw err;
+      return {
+        document: repaired,
+        exists: true,
+        issues: normalized.issues,
+        repaired: true,
+        repairBlocked: false
+      };
+    } catch (error) {
+      if (error instanceof ConditionalWriteError && attempt < maxRepairRetries) continue;
+      throw error;
     }
   }
-  throw new Error('Could not save — too many conflicting writes. Try again.');
+  throw new Error('Could not repair the shared logbook after concurrent changes.');
 }

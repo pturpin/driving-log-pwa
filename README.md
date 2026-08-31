@@ -1,148 +1,146 @@
-# Driving Log — PWA
+# Driving Log PWA
 
-Initial implementation matching `driving-log-pwa-spec.md`. Plain HTML/CSS/JS —
-no build step, no framework, no server code to run.
+A static, no-build GitHub Pages app for a shared supervised-driving logbook.
+The app uses browser IndexedDB for offline-first durability and conditionally
+writes one versioned document per driver directly to DynamoDB through Cognito
+guest credentials.
 
-## What's here
+## Offline-first behavior
 
+- After one successful setup/sync, the installed app opens from its service
+  worker cache, displays the last logbook, and accepts entry and active-drive
+  changes without network service.
+- Sessions, the shared active drive, pending entity changes, conflicts,
+  acknowledgements, device identity, and the last five confirmed remote
+  snapshots are stored in IndexedDB.
+- Sync runs on launch, when the browser reports an `online` event, when the
+  user taps **Sync**, and every 30 seconds while the app is open. Background
+  Sync is deliberately not required because browser support is inconsistent.
+- Settings and full disaster restore are online-only and require zero pending
+  local records. A concrete DynamoDB request, not only `navigator.onLine`,
+  determines whether the operation succeeds.
+- The header reports **offline**, **pending N**, **syncing**,
+  **needs attention**, or **synced**. Pending data is never silently discarded.
+
+On iPhone/iPad, use **Share → Add to Home Screen**. Safari may evict
+script-writable storage for sites that are not installed and have not been
+used for an extended period. The app requests persistent storage after a
+successful sync and shows whether the browser granted it, but current JSON
+backups remain important.
+
+## Conflict behavior
+
+The local effective log is always the last confirmed remote snapshot overlaid
+with local dirty entities. Conditional whole-document writes are serialized by
+a per-driver single-flight sync worker. Disjoint changes rebase automatically;
+same-entry edits/deletes and incompatible shared active-drive changes remain
+local until resolved.
+
+Stopping a drive (new session plus active clear) and merging entries (new
+session plus source tombstones) use atomic local groups and never partially
+commit. An uncertain write is considered applied only when the remote entity
+matches the expected local revision and this installation's `updatedBy`
+identity. A matching whole-document version alone is not proof.
+
+Explicit intervals conflict when `a.start < b.end && b.start < a.end`.
+Touching endpoints and duration-only entries are excluded. Entries whose start
+and end are each within five minutes are shown as likely duplicates; duplicate
+classification takes precedence over overlap. Migration-baseline overlaps are
+acknowledged from document metadata on every installation.
+
+## Data safety and schema
+
+Current remote documents use schema version 2 and include:
+
+- top-level `schemaVersion`, `minimumClientVersion`, `migratedAt`, and
+  `deletedSessions`;
+- stable session IDs, explicit/duration time kind, timestamps, revision, and
+  device authorship;
+- stable shared-active ID, revision, and device authorship.
+
+Legacy documents are conditionally migrated once using top-level
+`schemaVersion`. A current client repairs metadata removed by a stale legacy
+client without rerunning whole-document migration or resurrecting tombstones.
+The update-required gate blocks new current-client commands when the remote
+minimum version is newer, while preserving display, export, and pending data.
+Already-cached legacy clients cannot be stopped server-side under the retained
+direct-browser architecture.
+
+Remote DynamoDB data and backup JSON are treated as attacker-controlled.
+Prototype keys are removed, model fields are copied through strict allowlists,
+invalid records are quarantined visibly, and untrusted values are rendered
+only through DOM `textContent`/safe attributes. Printing constructs a separate
+document with DOM APIs. Connection codes are validated before persistence.
+
+## Backups and recovery
+
+- **Download backup** exports versioned schema metadata, live sessions,
+  settings, active state, and tombstones. AWS region, identity-pool ID, table
+  name, and setup codes are never exported.
+- **Restore from backup** validates and previews creates/changes/deletions,
+  then queues them as normal local changes. Unnamed current entries remain.
+- **Recover from local snapshot history** previews one of the last five
+  confirmed remote snapshots as safe local changes.
+- **Full disaster restore** is a separate confirmation-heavy online operation.
+  It requires no dirty records, uses a conditional write, and clears local
+  dirty/conflict/acknowledgement state only after the remote write is confirmed.
+
+The app warns at 250 KB because DynamoDB has a 400 KB item limit. Tombstones
+also consume item capacity. Export a backup before the warning approaches the
+limit; archival is intentionally outside this release.
+
+## AWS setup
+
+1. Create an on-demand DynamoDB table with a String partition key named
+   `driverId`.
+2. Create a Cognito Identity Pool with unauthenticated identities enabled.
+3. Restrict its unauthenticated IAM role to `dynamodb:GetItem` and
+   `dynamodb:PutItem` on only this table.
+4. On the first device, enter region, identity-pool ID, table, and driver name.
+5. For another device, enter its driver name and tap **Copy setup code**.
+   Share the code only over a trusted channel.
+
+### Accepted architectural risk
+
+A setup code is a bearer capability. Anyone who obtains it receives the same
+direct table access granted by the Cognito unauthenticated role. The static
+client cannot enforce per-user authorization, stop malicious writers, or make
+remote state authoritative against an attacker. Strict validation, conditional
+writes, random IDs, and local snapshot history reduce damage but do not fix
+authorization. An authenticated API is the future remediation.
+
+## Static hosting and local validation
+
+Deploy the entire repository to GitHub Pages (or another HTTPS static host).
+There is no package manager, build step, backend, or production bundler.
+
+For local testing:
+
+```sh
+python3 -m http.server 8080
 ```
-index.html          shell: setup gate + 4 screens (Home, Progress, Log, Settings)
-manifest.json        PWA install metadata
-sw.js                 minimal app-shell cache (never caches drive data)
-css/app.css          dashboard visual design (dark, amber/indigo gauge)
-js/app.js            UI logic, wiring, rendering
-js/config.js          setup-code encode/decode, per-device local config
-js/dynamo.js          DynamoDB read/write via Cognito guest credentials
-js/sun.js             offline sunrise/sunset calculation for day/night splits
-js/utils.js            day/night split math, formatting helpers
-js/export.js           print view, JSON backup/restore
-icons/               placeholder app icons (swap for real artwork any time)
-```
 
-This matches the spec: shared table with per-driver partitions, connection-code
-device setup (driver locked per device), manual entry, print export, JSON backup.
+Open `http://localhost:8080/`, then
+`http://localhost:8080/tests/`. The browser assertion page exercises migration,
+repair, quarantine, setup-code validation, dirty projection, rebase and atomic
+groups, uncertain-write authorship, overlap/duplicate rules, backup preview,
+DOM-safe rendering, vendor integrity, and the complete active shell cache.
 
----
+Manual release checks should cover:
 
-## 1. AWS setup (one-time, ~10 minutes)
+1. initial online setup and sync;
+2. installed cold offline launch, entry create/edit/delete, start/stop;
+3. reconnect and manual Sync, including a deliberately interrupted write;
+4. two-device same-entry, active, overlap, and duplicate resolution;
+5. update available while dirty (refresh must be gated);
+6. legacy metadata damage repair and tombstone preservation;
+7. normal import, snapshot recovery, and guarded full restore;
+8. Android Chromium and iOS Safari installed-app behavior.
 
-### DynamoDB table
-1. AWS Console → DynamoDB → **Create table**
-2. Table name: `DrivingLog`
-3. Partition key: `driverId` (String)
-4. Billing mode: **On-demand** (this workload is tiny — on-demand avoids paying
-   for provisioned capacity you don't use)
-5. Everything else default. Create.
+## Vendored AWS SDK
 
-### Cognito Identity Pool (guest access)
-1. Amazon Cognito → **Identity pools** → Create identity pool
-2. Enable **"Allow unauthenticated identities"** — this is what lets the PWA
-   get temporary AWS credentials with no login/signup flow
-3. Name it (e.g. `drivelog-pool`) and create
-4. Cognito auto-creates an IAM role for unauthenticated users, something like
-   `Cognito_drivelogpoolUnauth_Role` — note its name
-5. Note the **Identity Pool ID** shown after creation (format
-   `us-east-1:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) — you'll paste this into
-   the app later
-
-### Lock down the IAM role
-The unauthenticated role Cognito created has broad-ish defaults. Tighten it to
-only touch this one table:
-
-1. IAM → Roles → find the unauth role from the step above
-2. Add an inline policy:
-   ```json
-   {
-     "Version": "2012-10-17",
-     "Statement": [
-       {
-         "Effect": "Allow",
-         "Action": ["dynamodb:GetItem", "dynamodb:PutItem"],
-         "Resource": "arn:aws:dynamodb:REGION:ACCOUNT_ID:table/DrivingLog"
-       }
-     ]
-   }
-   ```
-   Replace `REGION` and `ACCOUNT_ID` with your values (found on the DynamoDB
-   table's "Overview" tab, in the ARN shown there).
-3. Remove any other broad default policies attached to this role, if present.
-
-This means a leaked setup code lets someone read/write this one table —
-nothing else in your AWS account.
-
----
-
-## 2. Hosting
-
-Needs plain HTTPS static hosting — no server-side code involved. Any of these
-work:
-
-- **Netlify / Vercel free tier** — drag-and-drop this folder, done
-- **S3 + CloudFront** — upload this folder to a bucket, serve via CloudFront
-  for HTTPS
-- **GitHub Pages** — push this folder to a repo, enable Pages
-
-Whatever you pick, the whole folder (including `icons/`) needs to be
-deployed together, at the same path structure.
-
-**Local testing** (before deploying): `python3 -m http.server 8080` from
-this folder, then visit `http://localhost:8080` — `localhost` is exempt
-from the HTTPS requirement for service workers, so this works for testing
-even though production needs real HTTPS.
-
----
-
-## 3. First-run setup (per device)
-
-**First device (whoever has the AWS values from step 1):**
-1. Open the deployed URL
-2. Tap **"First device? Enter AWS details manually"**
-3. Fill in region, Identity Pool ID, table name (`DrivingLog`), and a driver
-   name for this phone (e.g. `jamie`)
-4. **Save & connect**
-
-**Every other device:**
-1. On the first device, go to **Settings → Other devices**, type the new
-   driver's name, tap **Generate setup code**
-2. Send that code (starts with `dlog1.`) via Signal or similar
-3. On the new device, open the app, paste the code into **"Paste setup
-   code"**, tap **Connect this device**
-
-Each device is locked to one driver — there's no in-app driver switcher, by
-design (see spec §8).
-
----
-
-## 4. Notes on the AWS SDK dependency
-
-`js/dynamo.js` imports the AWS SDK v3 (DynamoDB client, Cognito credential
-provider, marshalling helpers) from `esm.sh` as ES modules — no bundler, no
-`npm install`, works straight from a `<script type="module">`. If your
-network policy doesn't allow loading from `esm.sh` at runtime, download the
-same three packages (`@aws-sdk/client-dynamodb`, `@aws-sdk/credential-provider-cognito-identity`, `@aws-sdk/util-dynamodb`) as ESM builds and change the three import URLs at
-the top of `js/dynamo.js` to point at your self-hosted copies — nothing else
-in the app needs to change.
-
-## 5. Astronomical day/night mode
-
-In **Settings → Day / Night Cutoff**, you can now enable
-**Use astronomical sunrise/sunset by date**.
-
-- Enter latitude/longitude manually, or tap **Use current device location**
-- Sunrise and sunset are calculated locally on the device for each date
-- The calculation works offline and does not send the location to a provider
-- Invalid settings or unsupported timezone/location combinations fall back to
-  your manual `day start` / `night start` settings
-
-## 6. Known gaps in this initial pass
-
-- **Icons** are simple generated placeholders matching the color system —
-  swap `icons/icon-192.png` / `icons/icon-512.png` for real artwork whenever
-  you like; sizes/paths already match the manifest.
-- **iOS install nudge** isn't built yet — right now iPhone users need to
-  know to use Share → Add to Home Screen themselves. Worth a small one-time
-  in-app banner if that's a real gap for your household.
-- **Offline write queue** isn't implemented — if a device is offline when
-  Start/Stop is tapped, it'll show an error rather than queuing the action
-  for later. Given this is home wifi/cell coverage for a driving log, likely
-  a non-issue, but flagging it as a known limitation.
+`js/vendor/aws-sdk.js` is a self-contained browser ESM bundle generated from
+exact official npm registry artifacts. It has no remote imports or runtime
+dependency fetches. `js/vendor/MANIFEST.md` records every source package's exact version,
+registry tarball, integrity value, and the shipped bundle SHA-256. Every
+vendored file is listed explicitly in `sw.js` `SHELL_ASSETS`.
