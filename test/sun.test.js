@@ -284,3 +284,11 @@ test('app purges obsolete cache before boot selection and before reset reload', 
   assert.ok(resetPurge > resetHandler && resetPurge < clearConfig);
   assert.ok(clearConfig < reload);
 });
+
+test('service worker bypasses cache-busted version checks', async () => {
+  const workerSource = await readFile(new URL('../sw.js', import.meta.url), 'utf8');
+  assert.match(
+    workerSource,
+    /url\.pathname === new URL\('\.\/version\.json', self\.location\.href\)\.pathname/
+  );
+});

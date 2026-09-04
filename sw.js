@@ -10,7 +10,7 @@
 // anything new, no matter how much version.json or the app's own code
 // changes. SW_VERSION exists purely to force that byte change — bump it on
 // every release, alongside APP_VERSION in js/app.js and version.json.
-const SW_VERSION = 'v0.15';
+const SW_VERSION = 'v0.16';
 
 const CACHE_PREFIX = 'drivelog-shell';
 const FALLBACK_VERSION = SW_VERSION;
@@ -75,7 +75,11 @@ self.addEventListener('fetch', (event) => {
   // Only intercept same-origin GET requests for shell assets.
   // Everything else (AWS SDK CDN imports, DynamoDB/Cognito calls) passes
   // straight through to the network, uncached.
-  if (event.request.method !== 'GET' || url.origin !== self.location.origin) {
+  if (
+    event.request.method !== 'GET' ||
+    url.origin !== self.location.origin ||
+    url.pathname === new URL('./version.json', self.location.href).pathname
+  ) {
     return;
   }
 

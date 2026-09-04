@@ -6,7 +6,7 @@ import { getCutoffsForDate, hasSunConfig, purgeLegacySunCache } from './sun.js';
 
 purgeLegacySunCache();
 
-const APP_VERSION = 'v0.15';
+const APP_VERSION = 'v0.16';
 
 let config = loadConfig();
 let currentItem = null;
