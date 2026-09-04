@@ -13,7 +13,7 @@ css/app.css          dashboard visual design (dark, amber/indigo gauge)
 js/app.js            UI logic, wiring, rendering
 js/config.js          setup-code encode/decode, per-device local config
 js/dynamo.js          DynamoDB read/write via Cognito guest credentials
-js/sun.js             sunrise/sunset lookup + local cache for day/night splits
+js/sun.js             offline sunrise/sunset calculation for day/night splits
 js/utils.js            day/night split math, formatting helpers
 js/export.js           print view, JSON backup/restore
 icons/               placeholder app icons (swap for real artwork any time)
@@ -129,9 +129,10 @@ In **Settings → Day / Night Cutoff**, you can now enable
 **Use astronomical sunrise/sunset by date**.
 
 - Enter latitude/longitude manually, or tap **Use current device location**
-- The app fetches sunrise/sunset per date from `api.sunrise-sunset.org`
-- Results are cached locally per date/location for fewer network calls
-- If fetch fails/offline, it falls back to your manual `day start` / `night start` settings
+- Sunrise and sunset are calculated locally on the device for each date
+- The calculation works offline and does not send the location to a provider
+- Invalid settings or unsupported timezone/location combinations fall back to
+  your manual `day start` / `night start` settings
 
 ## 6. Known gaps in this initial pass
 

@@ -2,9 +2,11 @@ import { loadConfig, saveConfig, clearConfig, encodeSetupCode, decodeSetupCode }
 import { readItem, updateItem } from './dynamo.js';
 import { splitDayNight, formatElapsed, formatMinutes, formatHoursDecimal, uid, formatDate, formatTime } from './utils.js';
 import { printLog, downloadBackup, parseBackup } from './export.js';
-import { getCutoffsForDate, hasSunConfig } from './sun.js';
+import { getCutoffsForDate, hasSunConfig, purgeLegacySunCache } from './sun.js';
 
-const APP_VERSION = 'v0.14';
+purgeLegacySunCache();
+
+const APP_VERSION = 'v0.15';
 
 let config = loadConfig();
 let currentItem = null;
@@ -1032,6 +1034,7 @@ function wireSettingsEvents() {
 
   document.getElementById('reset-device-btn').addEventListener('click', () => {
     if (!confirm('Disconnect this device? You\'ll need a setup code to reconnect.')) return;
+    purgeLegacySunCache();
     clearConfig();
     location.reload();
   });

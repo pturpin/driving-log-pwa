@@ -23,17 +23,15 @@ export function splitDayNight(start, end, dayStartHour, nightStartHour) {
 
   while (cur.getTime() < endMs && guard < 5000) {
     guard++;
-    const hour = cur.getHours() + cur.getMinutes() / 60 + cur.getSeconds() / 3600;
-    const isDay = hour >= dayStartHour && hour < nightStartHour;
-
     // Compute the next boundary after `cur`, on the correct calendar day.
     const dayStart = startOfDayPlusHours(cur, dayStartHour);
     const nightStart = startOfDayPlusHours(cur, nightStartHour);
+    const isDay = cur >= dayStart && cur < nightStart;
 
     let nextBoundary;
     if (isDay) {
       nextBoundary = nightStart > cur ? nightStart : addDays(nightStart, 1);
-    } else if (hour < dayStartHour) {
+    } else if (cur < dayStart) {
       nextBoundary = dayStart > cur ? dayStart : addDays(dayStart, 1);
     } else {
       // after nightStart, before midnight -> next boundary is tomorrow's dayStart
@@ -57,8 +55,14 @@ export function splitDayNight(start, end, dayStartHour, nightStartHour) {
 
 function startOfDayPlusHours(date, hours) {
   const d = new Date(date.getTime());
-  d.setHours(0, 0, 0, 0);
-  d.setTime(d.getTime() + hours * 3600000);
+  const totalMilliseconds = Math.round(hours * 3600000);
+  const hour = Math.floor(totalMilliseconds / 3600000);
+  let remainder = totalMilliseconds - hour * 3600000;
+  const minute = Math.floor(remainder / 60000);
+  remainder -= minute * 60000;
+  const second = Math.floor(remainder / 1000);
+  const millisecond = remainder - second * 1000;
+  d.setHours(hour, minute, second, millisecond);
   return d;
 }
 
