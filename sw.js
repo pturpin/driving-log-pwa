@@ -76,7 +76,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(networkFirst(request, './index.html'));
     return;
   }
-  if (url.pathname.endsWith('/version.json')) return;
+  if (url.pathname === new URL('./version.json', self.location.href).pathname) return;
   if (IMMUTABLE_PATHS.has(url.pathname)) {
     event.respondWith(
       caches.open(CACHE_NAME).then(async (cache) =>
