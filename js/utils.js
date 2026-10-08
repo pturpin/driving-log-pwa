@@ -1,5 +1,5 @@
 export const SCHEMA_VERSION = 2;
-export const CLIENT_VERSION = 'v0.17';
+export const CLIENT_VERSION = 'v0.18';
 export const DUPLICATE_TOLERANCE_MINUTES = 5;
 export const MAX_REMOTE_BYTES = 400 * 1024;
 export const REMOTE_WARNING_BYTES = 250 * 1024;
@@ -117,6 +117,29 @@ export function normalizeSettings(input, issues = []) {
       : defaults.useAstronomicalSun,
     latitude: numberOrDefault('latitude', -90, 90, false, true),
     longitude: numberOrDefault('longitude', -180, 180, false, true)
+  };
+}
+
+export function calculateRequirementProgress(
+  actualDayMinutes,
+  actualNightMinutes,
+  totalGoalMinutes,
+  nightGoalMinutes
+) {
+  const actualDay = Math.max(0, actualDayMinutes);
+  const actualNight = Math.max(0, actualNightMinutes);
+  const totalGoal = Math.max(0, totalGoalMinutes);
+  const nightGoal = Math.max(0, nightGoalMinutes);
+  const dayAllowance = Math.max(0, totalGoal - nightGoal);
+  const creditedDayMinutes = Math.min(actualDay, dayAllowance);
+  const creditedNightMinutes = Math.min(actualNight, totalGoal - creditedDayMinutes);
+  const countedTotalMinutes = creditedDayMinutes + creditedNightMinutes;
+
+  return {
+    creditedDayMinutes,
+    creditedNightMinutes,
+    countedTotalMinutes,
+    remainingMinutes: Math.max(0, totalGoal - countedTotalMinutes)
   };
 }
 

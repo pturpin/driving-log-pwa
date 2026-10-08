@@ -73,7 +73,8 @@
     </div>
     <button id="header-progress" class="header-progress" type="button">
       <span class="header-progress-track">
-        <span class="header-progress-fill" id="header-progress-fill"></span>
+        <span class="header-progress-segment header-progress-day" id="header-progress-day"></span>
+        <span class="header-progress-segment header-progress-night" id="header-progress-night"></span>
       </span>
       <span class="header-progress-label" id="header-progress-label"></span>
     </button>
@@ -111,14 +112,31 @@
 
       <div class="progress-rows">
         <div class="progress-row">
-          <span class="dot dot-day"></span>
-          <span class="progress-label">Day</span>
-          <span class="progress-value mono" id="day-hours-value">0.0 / 0 hrs</span>
+          <span class="dot dot-total"></span>
+          <span class="progress-label">Total Required</span>
+          <details class="progress-info">
+            <summary
+              class="progress-info-toggle"
+              aria-label="About Total Required hours"
+              aria-controls="total-required-info"
+            >i</summary>
+            <div class="progress-info-popup" id="total-required-info">
+              Daytime hours count toward the total only up to the total goal minus the night-hours goal.
+              All night hours count toward the total until the total goal is reached.
+              Day and Night below show all logged hours.
+            </div>
+          </details>
+          <span class="progress-value mono" id="total-hours-value">0.0 / 0 hrs</span>
         </div>
         <div class="progress-row">
           <span class="dot dot-night"></span>
           <span class="progress-label">Night</span>
           <span class="progress-value mono" id="night-hours-value">0.0 / 0 hrs</span>
+        </div>
+        <div class="progress-row">
+          <span class="dot dot-day"></span>
+          <span class="progress-label">Day</span>
+          <span class="progress-value mono" id="day-hours-value">0.0 hrs</span>
         </div>
       </div>
 

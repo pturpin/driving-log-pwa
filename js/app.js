@@ -18,6 +18,10 @@ import {
   normalizeSettings,
   splitDayNight
 } from './utils.js';
+import {
+  renderHeaderProgress as renderHeaderProgressFields,
+  renderProgressSummary
+} from './progress.js';
 import { downloadBackup, parseBackup, previewBackup, printLog } from './export.js';
 import { getCutoffsForDate, hasSunConfig, purgeLegacySunCache } from './sun.js';
 
@@ -311,32 +315,12 @@ function computeTotals(sessions) {
 
 function renderHeaderProgress() {
   const totals = computeTotals(state.item.sessions);
-  const goalMinutes = state.item.settings.goalTotalHours * 60;
-  const fraction = goalMinutes > 0 ? Math.min(totals.totalMinutes / goalMinutes, 1) : 0;
-  document.getElementById('header-progress-fill').style.width = `${fraction * 100}%`;
-  const remaining = Math.max(goalMinutes - totals.totalMinutes, 0);
-  document.getElementById('header-progress-label').textContent =
-    remaining ? `${formatHoursDecimal(remaining)} hrs left` : 'Goal reached';
+  renderHeaderProgressFields(document, totals, state.item.settings);
 }
 
 function renderProgress() {
   const totals = computeTotals(state.item.sessions);
-  const settings = state.item.settings;
-  const goalMinutes = settings.goalTotalHours * 60;
-  document.getElementById('gauge-total-hours').textContent = formatHoursDecimal(totals.totalMinutes);
-  document.getElementById('gauge-goal-hours').textContent = settings.goalTotalHours;
-  document.getElementById('day-hours-value').textContent =
-    `${formatHoursDecimal(totals.dayMinutes)} / ${Math.max(0, settings.goalTotalHours - settings.goalNightHours)} hrs`;
-  document.getElementById('night-hours-value').textContent =
-    `${formatHoursDecimal(totals.nightMinutes)} / ${settings.goalNightHours} hrs`;
-  const circumference = 2 * Math.PI * 92;
-  const dayFraction = goalMinutes ? Math.min(totals.dayMinutes / goalMinutes, 1) : 0;
-  const nightFraction = goalMinutes ? Math.min(totals.nightMinutes / goalMinutes, 1 - dayFraction) : 0;
-  const day = document.getElementById('gauge-day');
-  const night = document.getElementById('gauge-night');
-  day.style.strokeDasharray = `${circumference * dayFraction} ${circumference}`;
-  night.style.strokeDasharray = `${circumference * nightFraction} ${circumference}`;
-  night.style.strokeDashoffset = `${-circumference * dayFraction}`;
+  renderProgressSummary(document, totals, state.item.settings);
   renderWeeklyChart();
 }
 

@@ -1,4 +1,4 @@
-const SW_VERSION = 'v0.17';
+const SW_VERSION = 'v0.18';
 const CACHE_PREFIX = 'drivelog-shell';
 const CACHE_NAME = `${CACHE_PREFIX}-${SW_VERSION}`;
 
@@ -11,6 +11,7 @@ const SHELL_ASSETS = [
   './js/app.js',
   './js/config.js',
   './js/utils.js',
+  './js/progress.js',
   './js/dynamo.js',
   './js/sun.js',
   './js/export.js',
