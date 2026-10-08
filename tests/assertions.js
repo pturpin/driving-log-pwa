@@ -2,6 +2,7 @@ import {
   CLIENT_VERSION,
   SCHEMA_VERSION,
   emptyDocument,
+  formatSharedLogbookAge,
   normalizeRemoteDocument,
   safeJsonParse,
   serializeRemoteDocument
@@ -164,6 +165,15 @@ await test('setup code validates every bearer-capability field', () => {
     rejected = true;
   }
   assert(rejected);
+});
+
+await test('shared-logbook freshness formatter handles unavailable and elapsed times', () => {
+  const now = Date.parse('2026-10-08T22:35:22.000Z');
+  assert(formatSharedLogbookAge(null, now) === 'Shared logbook not checked yet');
+  assert(formatSharedLogbookAge('invalid', now) === 'Shared logbook not checked yet');
+  assert(formatSharedLogbookAge('2026-10-08T22:35:23.000Z', now) === 'Shared logbook not checked yet');
+  assert(formatSharedLogbookAge('2026-10-08T22:35:04.000Z', now) === 'Shared logbook checked 18 seconds ago');
+  assert(formatSharedLogbookAge('2026-10-08T20:35:22.000Z', now) === 'Shared logbook checked 2 hours ago');
 });
 
 await test('overlap is strict and duration entries are excluded', () => {
@@ -769,6 +779,16 @@ await test('snapshot recovery handler is available at app module scope', async (
     /^async function recoverSnapshot\(\) \{/m.test(source),
     'recoverSnapshot must be declared at module scope for event wiring'
   );
+});
+
+await test('header freshness is separate from live sync status semantics', async () => {
+  const source = await (await fetch('../index.html')).text();
+  const tag = source.match(/<span[^>]*id="shared-logbook-freshness"[^>]*>/)?.[0] || '';
+  assert(tag.includes('class="header-freshness"'));
+  assert(!tag.includes('aria-live='));
+  assert(!tag.includes('role='));
+  const syncButton = source.match(/<button[^>]*id="sync-status-btn"[^>]*>([\s\S]*?)<\/button>/)?.[1] || '';
+  assert(!syncButton.includes('shared-logbook-freshness'));
 });
 
 await test('full restore preserves the missing-item create condition', async () => {

@@ -21,6 +21,9 @@ guest credentials.
   determines whether the operation succeeds.
 - The header reports **offline**, **pending N**, **syncing**,
   **needs attention**, or **synced**. Pending data is never silently discarded.
+- Beside those controls, the header shows the relative age of this device's
+  last successful shared-logbook check. It is elapsed-time context, not a
+  countdown or guarantee that the next 30-second poll will complete.
 
 On iPhone/iPad, use **Share → Add to Home Screen**. Safari may evict
 script-writable storage for sites that are not installed and have not been

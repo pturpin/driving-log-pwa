@@ -1,5 +1,5 @@
 export const SCHEMA_VERSION = 2;
-export const CLIENT_VERSION = 'v0.18';
+export const CLIENT_VERSION = 'v0.19';
 export const DUPLICATE_TOLERANCE_MINUTES = 5;
 export const MAX_REMOTE_BYTES = 400 * 1024;
 export const REMOTE_WARNING_BYTES = 250 * 1024;
@@ -64,6 +64,33 @@ function boundedNumber(value, name, min, max, { integer = false, nullable = fals
 export function isValidIsoTimestamp(value) {
   if (typeof value !== 'string' || value.length > 40 || !/^\d{4}-\d{2}-\d{2}T/.test(value)) return false;
   return Number.isFinite(Date.parse(value));
+}
+
+export function normalizePastTimestamp(value, now = Date.now()) {
+  if (!isValidIsoTimestamp(value) || !Number.isFinite(now)) return null;
+  const timestamp = Date.parse(value);
+  if (timestamp > now) return null;
+  return new Date(timestamp).toISOString();
+}
+
+export function formatSharedLogbookAge(value, now = Date.now()) {
+  const normalized = normalizePastTimestamp(value, now);
+  if (!normalized) return 'Shared logbook not checked yet';
+  const seconds = Math.floor((now - Date.parse(normalized)) / 1000);
+  if (seconds < 5) return 'Shared logbook checked just now';
+  if (seconds < 60) {
+    return `Shared logbook checked ${seconds} second${seconds === 1 ? '' : 's'} ago`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `Shared logbook checked ${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `Shared logbook checked ${hours} hour${hours === 1 ? '' : 's'} ago`;
+  }
+  const days = Math.floor(hours / 24);
+  return `Shared logbook checked ${days} day${days === 1 ? '' : 's'} ago`;
 }
 
 function isoTimestamp(value, name, { optional = false } = {}) {

@@ -14,7 +14,9 @@ import {
   formatElapsed,
   formatHoursDecimal,
   formatMinutes,
+  formatSharedLogbookAge,
   formatTime,
+  normalizePastTimestamp,
   normalizeSettings,
   splitDayNight
 } from './utils.js';
@@ -225,7 +227,10 @@ function startPolling() {
 
 function startTicking() {
   clearInterval(tickHandle);
-  tickHandle = setInterval(updateTimerDisplay, 1000);
+  tickHandle = setInterval(() => {
+    updateTimerDisplay();
+    updateFreshnessDisplay();
+  }, 1000);
 }
 
 function renderAll() {
@@ -251,6 +256,7 @@ function renderStatus() {
   dot.className = `sync-dot ${state.status}`;
   document.getElementById('sync-status-label').textContent = labels[state.status] || state.status;
   document.getElementById('manual-sync-btn').disabled = state.status === 'syncing';
+  updateFreshnessDisplay();
   const conflictButton = document.getElementById('conflicts-btn');
   conflictButton.classList.toggle('hidden', state.conflicts.length === 0);
   conflictButton.textContent = `Needs attention (${state.conflicts.length})`;
@@ -259,6 +265,7 @@ function renderStatus() {
   const messages = [];
   if (state.sizeWarning) messages.push(`Shared logbook is ${Math.round(state.remoteBytes / 1024)} KB; export a backup before it approaches DynamoDB's 400 KB limit.`);
   if (state.lastError) messages.push(state.lastError);
+  if (state.freshnessWarning) messages.push(state.freshnessWarning);
   warning.replaceChildren();
   if (messages.length) {
     messages.forEach((message) => {
@@ -270,7 +277,9 @@ function renderStatus() {
   warning.classList.toggle('hidden', messages.length === 0);
   document.getElementById('sync-detail').textContent = [
     labels[state.status],
-    state.lastSyncAt ? `Last confirmed sync ${new Date(state.lastSyncAt).toLocaleString()}.` : 'No confirmed sync yet.',
+    normalizePastTimestamp(state.lastSyncAt)
+      ? `Shared logbook last checked ${new Date(state.lastSyncAt).toLocaleString()}.`
+      : 'Shared logbook has not been checked yet.',
     state.dirtyCount ? `${state.dirtyCount} local change(s) are durable on this device.` : 'No pending local changes.'
   ].join(' ');
   const storage = document.getElementById('storage-status-msg');
@@ -283,6 +292,16 @@ function renderStatus() {
   for (const id of ['start-stop-btn', 'add-entry-btn', 'save-settings-btn']) {
     document.getElementById(id).disabled = blockWrites;
   }
+}
+
+function updateFreshnessDisplay() {
+  const freshness = document.getElementById('shared-logbook-freshness');
+  if (!freshness || !state) return;
+  const normalized = normalizePastTimestamp(state.lastSyncAt);
+  freshness.textContent = formatSharedLogbookAge(normalized);
+  freshness.title = normalized
+    ? `Last checked ${new Date(normalized).toLocaleString()}`
+    : 'No successful shared-logbook check has been recorded on this device.';
 }
 
 function updateTimerDisplay() {
@@ -608,6 +627,10 @@ function wireAppEvents() {
     repository.recompute();
     repository.notify();
   });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') updateFreshnessDisplay();
+  });
+  window.addEventListener('pageshow', updateFreshnessDisplay);
   wireHomeEvents();
   wireEntryEvents();
   wireSettingsEvents();

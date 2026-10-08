@@ -10,6 +10,7 @@ import {
   entityEquals,
   isClientUpdateRequired,
   nextRevision,
+  normalizePastTimestamp,
   normalizeRemoteDocument,
   normalizeSettings,
   serializeRemoteDocument,
@@ -184,7 +185,9 @@ export class LogRepository {
     this.syncPromise = null;
     this.status = 'offline';
     this.lastError = '';
+    this.freshnessWarning = '';
     this.lastSyncAt = null;
+    this.hasConfirmedSyncThisSession = false;
     this.deviceId = null;
     this.storagePersisted = null;
     this.externalReloadPromise = null;
@@ -197,6 +200,7 @@ export class LogRepository {
       this.deviceId = createId();
       await this.store.setMetadata('installationId', this.deviceId);
     }
+    this.lastSyncAt = normalizePastTimestamp(await this.store.getMetadata('lastSyncAt'));
     await this.reloadLocalState({ notify: false });
     this.unsubscribeStoreChanges = this.store.subscribeChanges(() => {
       const reload = (this.externalReloadPromise || Promise.resolve())
@@ -288,7 +292,7 @@ export class LogRepository {
       }
       else if (this.dirty.length) this.status = navigator.onLine ? 'pending' : 'offline';
       else if (!navigator.onLine) this.status = 'offline';
-      else if (this.lastSyncAt) this.status = 'synced';
+      else if (this.hasConfirmedSyncThisSession) this.status = 'synced';
     }
   }
 
@@ -302,6 +306,7 @@ export class LogRepository {
       allDerivedConflicts: this.derivedConflicts,
       status: this.status,
       lastError: this.lastError,
+      freshnessWarning: this.freshnessWarning,
       lastSyncAt: this.lastSyncAt,
       updateRequired: isClientUpdateRequired(item, CLIENT_VERSION),
       remoteBytes: serializedByteLength(item),
@@ -564,6 +569,7 @@ export class LogRepository {
         this.notify();
         throw error;
       }
+      await this.recordSuccessfulCheck();
       this.snapshot = read.document;
       await this.store.saveSnapshot(this.snapshot);
       this.recordValidationIssues(read.issues);
@@ -602,8 +608,6 @@ export class LogRepository {
       }
       this.replaceTechnicalSyncConflicts(conflicts);
       if (!eligible.length) {
-        this.lastSyncAt = new Date().toISOString();
-        await this.store.setMetadata('lastSyncAt', this.lastSyncAt);
         await this.persistConflicts();
         await this.requestPersistentStorage();
         this.status = this.dirty.length ? 'attention' : 'synced';
@@ -700,8 +704,6 @@ export class LogRepository {
         );
         persistedRebased.forEach((record) => this.replaceDirty(record));
         await this.persistConflicts();
-        this.lastSyncAt = new Date().toISOString();
-        await this.store.setMetadata('lastSyncAt', this.lastSyncAt);
         await this.requestPersistentStorage();
         this.status = this.dirty.length ? 'attention' : 'synced';
         this.recompute();
@@ -789,6 +791,17 @@ export class LogRepository {
     await this.store.putConflicts(this.technicalConflicts);
   }
 
+  async recordSuccessfulCheck() {
+    this.lastSyncAt = new Date().toISOString();
+    this.hasConfirmedSyncThisSession = true;
+    try {
+      await this.store.setMetadata('lastSyncAt', this.lastSyncAt);
+      this.freshnessWarning = '';
+    } catch {
+      this.freshnessWarning = 'Shared logbook was checked, but this device could not save the check time for the next app restart.';
+    }
+  }
+
   async requestPersistentStorage() {
     if (!navigator.storage?.persist || this.storagePersisted === true) return;
     try {
@@ -833,6 +846,7 @@ export class LogRepository {
     const adapter = await this.loadAdapter();
     for (let attempt = 0; attempt < 3; attempt++) {
       const read = await adapter.readItem(this.config, this.snapshot);
+      await this.recordSuccessfulCheck();
       this.snapshot = read.document;
       await this.store.saveSnapshot(this.snapshot);
       this.recordValidationIssues(read.issues);
@@ -855,7 +869,6 @@ export class LogRepository {
         const written = await adapter.writeItem(this.config, next, this.snapshot.version, read.exists);
         this.snapshot = written;
         await this.store.saveSnapshot(written);
-        this.lastSyncAt = new Date().toISOString();
         this.status = 'synced';
         this.recompute();
         this.notify();
@@ -939,6 +952,7 @@ export class LogRepository {
     if (!navigator.onLine) throw new Error('Full restore requires a confirmed network connection.');
     const adapter = await this.loadAdapter();
     const read = await adapter.readItem(this.config, this.snapshot);
+    await this.recordSuccessfulCheck();
     if (isClientUpdateRequired(read.document, CLIENT_VERSION)) {
       this.snapshot = read.document;
       await this.store.saveSnapshot(read.document);
@@ -967,7 +981,6 @@ export class LogRepository {
     this.dirty = [];
     this.technicalConflicts = [];
     this.acknowledgements = new Set();
-    this.lastSyncAt = new Date().toISOString();
     this.status = 'synced';
     this.recompute();
     this.notify();

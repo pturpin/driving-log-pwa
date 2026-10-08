@@ -1,4 +1,4 @@
-const SW_VERSION = 'v0.18';
+const SW_VERSION = 'v0.19';
 const CACHE_PREFIX = 'drivelog-shell';
 const CACHE_NAME = `${CACHE_PREFIX}-${SW_VERSION}`;
 
